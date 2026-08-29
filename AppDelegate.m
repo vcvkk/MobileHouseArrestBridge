@@ -8,7 +8,11 @@
     self.window.backgroundColor = [UIColor blackColor];
     
     GlassStatusViewController *rootVC = [[GlassStatusViewController alloc] init];
-    self.window.rootViewController = rootVC;
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:rootVC];
+    nav.navigationBar.barStyle = UIBarStyleBlack;
+    nav.navigationBar.tintColor = [UIColor colorWithRed:0.20 green:0.78 blue:0.55 alpha:1.0];
+    
+    self.window.rootViewController = nav;
     [self.window makeKeyAndVisible];
     
     return YES;

@@ -39,6 +39,7 @@ jobs:
           mkdir -p Payload/MobileHouseArrestBridge.app
           cp MobileHouseArrestBridge Payload/MobileHouseArrestBridge.app/
           cp Info.plist Payload/MobileHouseArrestBridge.app/
+          cp Icons/*.png Payload/MobileHouseArrestBridge.app/ || true
           codesign -f -s - --identifier com.apple.mobile.MobileHouseArrest Payload/MobileHouseArrestBridge.app
           zip -r MobileHouseArrestBridge.ipa Payload
 

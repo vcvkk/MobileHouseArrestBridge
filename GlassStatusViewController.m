@@ -3,14 +3,15 @@
 
 @interface GlassStatusViewController ()
 
-@property (nonatomic, strong) UIVisualEffectView *headerGlassCard;
-@property (nonatomic, strong) UIVisualEffectView *consoleGlassCard;
-@property (nonatomic, strong) UILabel *titleLabel;
-@property (nonatomic, strong) UILabel *statusBadgeLabel;
-@property (nonatomic, strong) UILabel *deviceMetaLabel;
-@property (nonatomic, strong) UITextView *logTextView;
-@property (nonatomic, strong) UIView *statusOrb;
-@property (nonatomic, strong) NSMutableArray<NSString *> *logsArray;
+@property (nonatomic, strong) UISegmentedControl *segmentedControl;
+@property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) UIView *consoleContainer;
+@property (nonatomic, strong) UITextView *consoleTextView;
+@property (nonatomic, strong) NSMutableArray<NSString *> *logHistory;
+
+@property (nonatomic, strong) NSString *deviceModel;
+@property (nonatomic, strong) NSString *osVersion;
+@property (nonatomic, assign) NSUInteger activeClientsCount;
 
 @end
 
@@ -18,184 +19,242 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.logsArray = [NSMutableArray array];
+    self.title = @"HouseArrest";
+    self.view.backgroundColor = [UIColor colorWithRed:0.06 green:0.07 blue:0.09 alpha:1.0];
+    self.logHistory = [NSMutableArray array];
     
-    [self setupBackdrop];
-    [self setupHeaderGlassCard];
-    [self setupConsoleGlassCard];
+    [self loadSystemInfo];
+    [self setupNavigationBar];
+    [self setupSegmentedControl];
+    [self setupTableView];
+    [self setupConsoleView];
     
     [MHAServer sharedServer].delegate = self;
     
     NSError *error = nil;
     if (![[MHAServer sharedServer] startOnPort:8080 error:&error]) {
-        [self serverDidLogMessage:[NSString stringWithFormat:@"Failed to bind server: %@", error.localizedDescription] isError:YES];
+        [self serverDidLogMessage:[NSString stringWithFormat:@"Failed to bind port 8080: %@", error.localizedDescription] isError:YES];
     } else {
-        [self serverDidLogMessage:@"MobileHouseArrest Liquid Glass Environment Initialized." isError:NO];
-        [self serverDidLogMessage:@"Listening for USB bridge on localhost:8080." isError:NO];
+        [self serverDidLogMessage:@"MobileHouseArrest daemon listening on 0.0.0.0:8080" isError:NO];
+        [self serverDidLogMessage:@"Bridge ready for incoming USB mux / TCP clients." isError:NO];
     }
 }
 
-- (UIStatusBarStyle)preferredStatusBarStyle {
-    return UIStatusBarStyleLightContent;
-}
-
-#pragma mark - Liquid Glass Layout & Styling
-
-- (void)setupBackdrop {
-    self.view.backgroundColor = [UIColor colorWithRed:0.04 green:0.04 blue:0.06 alpha:1.0];
+- (void)loadSystemInfo {
+    struct utsname systemInfo;
+    uname(&systemInfo);
+    self.deviceModel = [NSString stringWithCString:systemInfo.machine encoding:NSUTF8StringEncoding] ?: @"iPhone";
     
-    // Ambient specular background glow
-    CAGradientLayer *glow = [CAGradientLayer layer];
-    glow.frame = [UIScreen mainScreen].bounds;
-    glow.colors = @[
-        (id)[UIColor colorWithRed:0.10 green:0.18 blue:0.28 alpha:0.5].CGColor,
-        (id)[UIColor colorWithRed:0.04 green:0.04 blue:0.07 alpha:0.9].CGColor,
-        (id)[UIColor colorWithRed:0.02 green:0.02 blue:0.03 alpha:1.0].CGColor
-    ];
-    glow.locations = @[@0.0, @0.45, @1.0];
-    [self.view.layer insertSublayer:glow atIndex:0];
-}
-
-- (void)setupHeaderGlassCard {
-    UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
-    self.headerGlassCard = [[UIVisualEffectView alloc] initWithEffect:blur];
-    self.headerGlassCard.translatesAutoresizingMaskIntoConstraints = NO;
-    self.headerGlassCard.layer.cornerRadius = 24;
-    self.headerGlassCard.layer.masksToBounds = YES;
-    self.headerGlassCard.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.14].CGColor;
-    self.headerGlassCard.layer.borderWidth = 1.0;
-    [self.view addSubview:self.headerGlassCard];
-    
-    // Status orb (active glowing dot)
-    self.statusOrb = [[UIView alloc] init];
-    self.statusOrb.translatesAutoresizingMaskIntoConstraints = NO;
-    self.statusOrb.backgroundColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:1.0];
-    self.statusOrb.layer.cornerRadius = 5;
-    self.statusOrb.layer.shadowColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:0.8].CGColor;
-    self.statusOrb.layer.shadowRadius = 8;
-    self.statusOrb.layer.shadowOpacity = 1.0;
-    [self.headerGlassCard.contentView addSubview:self.statusOrb];
-    
-    // Title
-    self.titleLabel = [[UILabel alloc] init];
-    self.titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.titleLabel.text = @"MobileHouseArrest Bridge";
-    self.titleLabel.textColor = [UIColor whiteColor];
-    self.titleLabel.font = [UIFont systemFontOfSize:19 weight:UIFontWeightBold];
-    [self.headerGlassCard.contentView addSubview:self.titleLabel];
-    
-    // Status Badge
-    self.statusBadgeLabel = [[UILabel alloc] init];
-    self.statusBadgeLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.statusBadgeLabel.text = @"Daemon Online  •  Port 8080";
-    self.statusBadgeLabel.textColor = [UIColor colorWithRed:0.35 green:0.85 blue:0.55 alpha:1.0];
-    self.statusBadgeLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    [self.headerGlassCard.contentView addSubview:self.statusBadgeLabel];
-    
-    // Device info
-    struct utsname u;
-    uname(&u);
-    NSString *model = [NSString stringWithCString:u.machine encoding:NSUTF8StringEncoding];
     NSOperatingSystemVersion os = [[NSProcessInfo processInfo] operatingSystemVersion];
+    self.osVersion = [NSString stringWithFormat:@"iOS %ld.%ld.%ld", (long)os.majorVersion, (long)os.minorVersion, (long)os.patchVersion];
+    self.activeClientsCount = 0;
+}
+
+- (void)setupNavigationBar {
+    if (self.navigationController) {
+        self.navigationController.navigationBar.prefersLargeTitles = YES;
+        self.navigationController.navigationBar.barStyle = UIBarStyleBlack;
+        self.navigationController.navigationBar.tintColor = [UIColor colorWithRed:0.20 green:0.78 blue:0.55 alpha:1.0];
+        
+        UIBarButtonItem *shareItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(shareLogs)];
+        self.navigationItem.rightBarButtonItem = shareItem;
+    }
+}
+
+- (void)setupSegmentedControl {
+    self.segmentedControl = [[UISegmentedControl alloc] initWithItems:@[@"Dashboard", @"Console Logs"]];
+    self.segmentedControl.selectedSegmentIndex = 0;
+    self.segmentedControl.translatesAutoresizingMaskIntoConstraints = NO;
+    self.segmentedControl.backgroundColor = [UIColor colorWithRed:0.12 green:0.14 blue:0.18 alpha:1.0];
+    self.segmentedControl.selectedSegmentTintColor = [UIColor colorWithRed:0.20 green:0.24 blue:0.32 alpha:1.0];
     
-    self.deviceMetaLabel = [[UILabel alloc] init];
-    self.deviceMetaLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.deviceMetaLabel.text = [NSString stringWithFormat:@"%@  •  iOS %ld.%ld.%ld  •  PID %d",
-                                model, (long)os.majorVersion, (long)os.minorVersion, (long)os.patchVersion,
-                                [[NSProcessInfo processInfo] processIdentifier]];
-    self.deviceMetaLabel.textColor = [UIColor colorWithWhite:0.65 alpha:1.0];
-    self.deviceMetaLabel.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
-    [self.headerGlassCard.contentView addSubview:self.deviceMetaLabel];
+    NSDictionary *attr = @{NSForegroundColorAttributeName: [UIColor whiteColor], NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightMedium]};
+    [self.segmentedControl setTitleTextAttributes:attr forState:UIControlStateNormal];
+    [self.segmentedControl setTitleTextAttributes:attr forState:UIControlStateSelected];
     
-    // AutoLayout
+    [self.segmentedControl addTarget:self action:@selector(segmentChanged:) forControlEvents:UIControlEventValueChanged];
+    [self.view addSubview:self.segmentedControl];
+    
     UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [self.headerGlassCard.topAnchor constraintEqualToAnchor:guide.topAnchor constant:12],
-        [self.headerGlassCard.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
-        [self.headerGlassCard.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-        [self.headerGlassCard.heightAnchor constraintEqualToConstant:106],
-        
-        [self.statusOrb.leadingAnchor constraintEqualToAnchor:self.headerGlassCard.contentView.leadingAnchor constant:18],
-        [self.statusOrb.topAnchor constraintEqualToAnchor:self.headerGlassCard.contentView.topAnchor constant:22],
-        [self.statusOrb.widthAnchor constraintEqualToConstant:10],
-        [self.statusOrb.heightAnchor constraintEqualToConstant:10],
-        
-        [self.titleLabel.leadingAnchor constraintEqualToAnchor:self.statusOrb.trailingAnchor constant:10],
-        [self.titleLabel.centerYAnchor constraintEqualToAnchor:self.statusOrb.centerYAnchor],
-        [self.titleLabel.trailingAnchor constraintEqualToAnchor:self.headerGlassCard.contentView.trailingAnchor constant:-16],
-        
-        [self.statusBadgeLabel.leadingAnchor constraintEqualToAnchor:self.statusOrb.leadingAnchor],
-        [self.statusBadgeLabel.topAnchor constraintEqualToAnchor:self.titleLabel.bottomAnchor constant:8],
-        
-        [self.deviceMetaLabel.leadingAnchor constraintEqualToAnchor:self.statusOrb.leadingAnchor],
-        [self.deviceMetaLabel.topAnchor constraintEqualToAnchor:self.statusBadgeLabel.bottomAnchor constant:6]
+        [self.segmentedControl.topAnchor constraintEqualToAnchor:guide.topAnchor constant:8],
+        [self.segmentedControl.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
+        [self.segmentedControl.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
+        [self.segmentedControl.heightAnchor constraintEqualToConstant:32]
     ]];
-    
-    // Pulse animation on status orb
-    CABasicAnimation *pulse = [CABasicAnimation animationWithKeyPath:@"opacity"];
-    pulse.duration = 1.2;
-    pulse.fromValue = @1.0;
-    pulse.toValue = @0.4;
-    pulse.autoreverses = YES;
-    pulse.repeatCount = HUGE_VALF;
-    [self.statusOrb.layer addAnimation:pulse forKey:@"pulse"];
 }
 
-- (void)setupConsoleGlassCard {
-    UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
-    self.consoleGlassCard = [[UIVisualEffectView alloc] initWithEffect:blur];
-    self.consoleGlassCard.translatesAutoresizingMaskIntoConstraints = NO;
-    self.consoleGlassCard.layer.cornerRadius = 24;
-    self.consoleGlassCard.layer.masksToBounds = YES;
-    self.consoleGlassCard.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.12].CGColor;
-    self.consoleGlassCard.layer.borderWidth = 1.0;
-    [self.view addSubview:self.consoleGlassCard];
+- (void)setupTableView {
+    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
+    self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.tableView.backgroundColor = [UIColor clearColor];
+    self.tableView.dataSource = self;
+    self.tableView.delegate = self;
+    self.tableView.separatorColor = [UIColor colorWithWhite:1.0 alpha:0.08];
+    [self.view addSubview:self.tableView];
     
-    // Header Bar Inside Console
-    UILabel *headerTitle = [[UILabel alloc] init];
-    headerTitle.translatesAutoresizingMaskIntoConstraints = NO;
-    headerTitle.text = @"CONSOLE ACTIVITY";
-    headerTitle.textColor = [UIColor colorWithWhite:0.50 alpha:1.0];
-    headerTitle.font = [UIFont systemFontOfSize:11 weight:UIFontWeightBold];
-    [self.consoleGlassCard.contentView addSubview:headerTitle];
+    UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [self.tableView.topAnchor constraintEqualToAnchor:self.segmentedControl.bottomAnchor constant:8],
+        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.tableView.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor]
+    ]];
+}
+
+- (void)setupConsoleView {
+    self.consoleContainer = [[UIView alloc] init];
+    self.consoleContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    self.consoleContainer.hidden = YES;
+    self.consoleContainer.backgroundColor = [UIColor colorWithRed:0.04 green:0.05 blue:0.07 alpha:1.0];
+    self.consoleContainer.layer.cornerRadius = 16;
+    self.consoleContainer.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.10].CGColor;
+    self.consoleContainer.layer.borderWidth = 1.0;
+    self.consoleContainer.layer.masksToBounds = YES;
+    [self.view addSubview:self.consoleContainer];
     
-    // Clear Button (Glass Style)
+    // Top Bar inside console with Clear Button
+    UIView *topBar = [[UIView alloc] init];
+    topBar.translatesAutoresizingMaskIntoConstraints = NO;
+    topBar.backgroundColor = [UIColor colorWithRed:0.09 green:0.11 blue:0.14 alpha:1.0];
+    [self.consoleContainer addSubview:topBar];
+    
+    UILabel *lbl = [[UILabel alloc] init];
+    lbl.translatesAutoresizingMaskIntoConstraints = NO;
+    lbl.text = @"AUDIT TRAIL";
+    lbl.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightBold];
+    lbl.textColor = [UIColor colorWithWhite:0.55 alpha:1.0];
+    [topBar addSubview:lbl];
+    
     UIButton *clearBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     clearBtn.translatesAutoresizingMaskIntoConstraints = NO;
     [clearBtn setTitle:@"Clear" forState:UIControlStateNormal];
-    [clearBtn setTitleColor:[UIColor colorWithWhite:0.75 alpha:1.0] forState:UIControlStateNormal];
+    [clearBtn setTitleColor:[UIColor colorWithRed:0.95 green:0.40 blue:0.40 alpha:1.0] forState:UIControlStateNormal];
     clearBtn.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
     [clearBtn addTarget:self action:@selector(clearLogs) forControlEvents:UIControlEventTouchUpInside];
-    [self.consoleGlassCard.contentView addSubview:clearBtn];
+    [topBar addSubview:clearBtn];
     
-    // Log TextView
-    self.logTextView = [[UITextView alloc] init];
-    self.logTextView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.logTextView.backgroundColor = [UIColor clearColor];
-    self.logTextView.textColor = [UIColor colorWithRed:0.35 green:0.88 blue:0.65 alpha:1.0];
-    self.logTextView.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
-    self.logTextView.editable = NO;
-    self.logTextView.showsVerticalScrollIndicator = YES;
-    [self.consoleGlassCard.contentView addSubview:self.logTextView];
+    self.consoleTextView = [[UITextView alloc] init];
+    self.consoleTextView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.consoleTextView.backgroundColor = [UIColor clearColor];
+    self.consoleTextView.textColor = [UIColor colorWithRed:0.40 green:0.85 blue:0.65 alpha:1.0];
+    self.consoleTextView.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
+    self.consoleTextView.editable = NO;
+    self.consoleTextView.textContainerInset = UIEdgeInsetsMake(12, 12, 12, 12);
+    [self.consoleContainer addSubview:self.consoleTextView];
     
     UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [self.consoleGlassCard.topAnchor constraintEqualToAnchor:self.headerGlassCard.bottomAnchor constant:14],
-        [self.consoleGlassCard.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
-        [self.consoleGlassCard.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-        [self.consoleGlassCard.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor constant:-14],
+        [self.consoleContainer.topAnchor constraintEqualToAnchor:self.segmentedControl.bottomAnchor constant:12],
+        [self.consoleContainer.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
+        [self.consoleContainer.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
+        [self.consoleContainer.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor constant:-12],
         
-        [headerTitle.leadingAnchor constraintEqualToAnchor:self.consoleGlassCard.contentView.leadingAnchor constant:18],
-        [headerTitle.topAnchor constraintEqualToAnchor:self.consoleGlassCard.contentView.topAnchor constant:14],
+        [topBar.topAnchor constraintEqualToAnchor:self.consoleContainer.topAnchor],
+        [topBar.leadingAnchor constraintEqualToAnchor:self.consoleContainer.leadingAnchor],
+        [topBar.trailingAnchor constraintEqualToAnchor:self.consoleContainer.trailingAnchor],
+        [topBar.heightAnchor constraintEqualToConstant:36],
         
-        [clearBtn.trailingAnchor constraintEqualToAnchor:self.consoleGlassCard.contentView.trailingAnchor constant:-18],
-        [clearBtn.centerYAnchor constraintEqualToAnchor:headerTitle.centerYAnchor],
+        [lbl.leadingAnchor constraintEqualToAnchor:topBar.leadingAnchor constant:14],
+        [lbl.centerYAnchor constraintEqualToAnchor:topBar.centerYAnchor],
         
-        [self.logTextView.topAnchor constraintEqualToAnchor:headerTitle.bottomAnchor constant:10],
-        [self.logTextView.leadingAnchor constraintEqualToAnchor:self.consoleGlassCard.contentView.leadingAnchor constant:12],
-        [self.logTextView.trailingAnchor constraintEqualToAnchor:self.consoleGlassCard.contentView.trailingAnchor constant:-12],
-        [self.logTextView.bottomAnchor constraintEqualToAnchor:self.consoleGlassCard.contentView.bottomAnchor constant:-12]
+        [clearBtn.trailingAnchor constraintEqualToAnchor:topBar.trailingAnchor constant:-14],
+        [clearBtn.centerYAnchor constraintEqualToAnchor:topBar.centerYAnchor],
+        
+        [self.consoleTextView.topAnchor constraintEqualToAnchor:topBar.bottomAnchor],
+        [self.consoleTextView.leadingAnchor constraintEqualToAnchor:self.consoleContainer.leadingAnchor],
+        [self.consoleTextView.trailingAnchor constraintEqualToAnchor:self.consoleContainer.trailingAnchor],
+        [self.consoleTextView.bottomAnchor constraintEqualToAnchor:self.consoleContainer.bottomAnchor]
     ]];
+}
+
+- (void)segmentChanged:(UISegmentedControl *)sender {
+    if (sender.selectedSegmentIndex == 0) {
+        self.tableView.hidden = NO;
+        self.consoleContainer.hidden = YES;
+    } else {
+        self.tableView.hidden = YES;
+        self.consoleContainer.hidden = NO;
+        [self refreshConsoleDisplay];
+    }
+}
+
+#pragma mark - TableView Data Source
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    return 3;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if (section == 0) return 3; // Daemon status, Port, Transport
+    if (section == 1) return 3; // Capabilities: Class 2, Class 7, Class 13
+    if (section == 2) return 3; // Device Model, OS Version, Mach PID
+    return 0;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if (section == 0) return @"SERVICE STATUS";
+    if (section == 1) return @"SANDBOX CAPABILITIES";
+    if (section == 2) return @"HOST ENVIRONMENT";
+    return nil;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"MHAStatusCell"];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"MHAStatusCell"];
+        cell.backgroundColor = [UIColor colorWithRed:0.11 green:0.13 blue:0.17 alpha:1.0];
+        cell.textLabel.textColor = [UIColor whiteColor];
+        cell.textLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightRegular];
+        cell.detailTextLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    }
+    
+    if (indexPath.section == 0) {
+        if (indexPath.row == 0) {
+            cell.textLabel.text = @"Daemon State";
+            cell.detailTextLabel.text = [MHAServer sharedServer].isRunning ? @"Listening" : @"Stopped";
+            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.25 green:0.85 blue:0.55 alpha:1.0];
+        } else if (indexPath.row == 1) {
+            cell.textLabel.text = @"Listen Address";
+            cell.detailTextLabel.text = @"0.0.0.0:8080";
+            cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0];
+        } else if (indexPath.row == 2) {
+            cell.textLabel.text = @"Tunnel Type";
+            cell.detailTextLabel.text = @"USBMux TCP Bridge";
+            cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0];
+        }
+    } else if (indexPath.section == 1) {
+        if (indexPath.row == 0) {
+            cell.textLabel.text = @"App Data (Class 2)";
+            cell.detailTextLabel.text = @"Read / Write";
+            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.35 green:0.85 blue:0.55 alpha:1.0];
+        } else if (indexPath.row == 1) {
+            cell.textLabel.text = @"App Groups (Class 7)";
+            cell.detailTextLabel.text = @"Read / Write";
+            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.35 green:0.85 blue:0.55 alpha:1.0];
+        } else if (indexPath.row == 2) {
+            cell.textLabel.text = @"System Groups (Class 13)";
+            cell.detailTextLabel.text = @"MobileGestalt Cache";
+            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.35 green:0.85 blue:0.55 alpha:1.0];
+        }
+    } else if (indexPath.section == 2) {
+        if (indexPath.row == 0) {
+            cell.textLabel.text = @"Target Hardware";
+            cell.detailTextLabel.text = self.deviceModel;
+            cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0];
+        } else if (indexPath.row == 1) {
+            cell.textLabel.text = @"Software Version";
+            cell.detailTextLabel.text = self.osVersion;
+            cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0];
+        } else if (indexPath.row == 2) {
+            cell.textLabel.text = @"Process Identifier";
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"PID %d", [[NSProcessInfo processInfo] processIdentifier]];
+            cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0];
+        }
+    }
+    
+    return cell;
 }
 
 #pragma mark - MHAServerDelegate
@@ -205,32 +264,47 @@
     [df setDateFormat:@"HH:mm:ss"];
     NSString *ts = [df stringFromDate:[NSDate date]];
     
-    NSString *prefix = isError ? @"[!]" : @"[+]";
-    NSString *formatted = [NSString stringWithFormat:@"[%@] %@ %@", ts, prefix, message];
+    NSString *tag = isError ? @"[ERR]" : @"[INFO]";
+    NSString *line = [NSString stringWithFormat:@"%@ %@ %@", ts, tag, message];
     
-    [self.logsArray addObject:formatted];
-    if (self.logsArray.count > 250) {
-        [self.logsArray removeObjectAtIndex:0];
+    [self.logHistory addObject:line];
+    if (self.logHistory.count > 300) {
+        [self.logHistory removeObjectAtIndex:0];
     }
     
     dispatch_async(dispatch_get_main_queue(), ^{
-        self.logTextView.text = [self.logsArray componentsJoinedByString:@"\n"];
-        if (self.logTextView.text.length > 0) {
-            NSRange bottom = NSMakeRange(self.logTextView.text.length - 1, 1);
-            [self.logTextView scrollRangeToVisible:bottom];
+        if (!self.consoleContainer.hidden) {
+            [self refreshConsoleDisplay];
         }
     });
 }
 
 - (void)serverClientCountDidChange:(NSUInteger)count {
+    self.activeClientsCount = count;
     dispatch_async(dispatch_get_main_queue(), ^{
-        self.statusBadgeLabel.text = [NSString stringWithFormat:@"Daemon Online  •  Clients: %lu", (unsigned long)count];
+        [self.tableView reloadData];
     });
 }
 
+- (void)refreshConsoleDisplay {
+    self.consoleTextView.text = [self.logHistory componentsJoinedByString:@"\n"];
+    if (self.consoleTextView.text.length > 0) {
+        NSRange bottom = NSMakeRange(self.consoleTextView.text.length - 1, 1);
+        [self.consoleTextView scrollRangeToVisible:bottom];
+    }
+}
+
 - (void)clearLogs {
-    [self.logsArray removeAllObjects];
-    self.logTextView.text = @"";
+    [self.logHistory removeAllObjects];
+    self.consoleTextView.text = @"";
+}
+
+- (void)shareLogs {
+    NSString *text = [self.logHistory componentsJoinedByString:@"\n"];
+    if (text.length == 0) return;
+    
+    UIActivityViewController *act = [[UIActivityViewController alloc] initWithActivityItems:@[text] applicationActivities:nil];
+    [self presentViewController:act animated:YES completion:nil];
 }
 
 @end

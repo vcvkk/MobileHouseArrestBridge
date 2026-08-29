@@ -3,7 +3,7 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface GlassStatusViewController : UIViewController <MHAServerDelegate>
+@interface GlassStatusViewController : UIViewController <MHAServerDelegate, UITableViewDataSource, UITableViewDelegate>
 
 @end
 
