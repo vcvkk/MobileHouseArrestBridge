@@ -4,10 +4,19 @@
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 
+@interface TelegramTitleBar : UIView
+@end
+
+@implementation TelegramTitleBar
+- (CGSize)intrinsicContentSize {
+    return CGSizeMake(236.0, 32.0);
+}
+@end
+
 @interface GlassStatusViewController () <UIScrollViewDelegate>
 
 // Telegram-iOS LiquidLens TitleView
-@property (nonatomic, strong) UIView *telegramGlassTitleView;
+@property (nonatomic, strong) TelegramTitleBar *telegramGlassTitleView;
 @property (nonatomic, strong) UIVisualEffectView *glassBackdropView;
 @property (nonatomic, strong) UIView *liquidLensView;
 @property (nonatomic, strong) UIView *slidingPillView;
@@ -84,8 +93,10 @@
     UIBarButtonItem *shareItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(shareLogs)];
     self.navigationItem.rightBarButtonItem = shareItem;
     
-    // Telegram-iOS Liquid Lens Container: 236 x 32
-    self.telegramGlassTitleView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 236, 32)];
+    // Telegram-iOS Liquid Lens Container (custom view with intrinsicContentSize for reliable navigation hit-testing)
+    self.telegramGlassTitleView = [[TelegramTitleBar alloc] initWithFrame:CGRectMake(0, 0, 236, 32)];
+    self.telegramGlassTitleView.userInteractionEnabled = YES;
+    self.telegramGlassTitleView.clipsToBounds = NO;
     
     // 1. Telegram-iOS Resting Background with ColorMatrix CAFilter
     UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleLight];
@@ -95,6 +106,7 @@
     self.glassBackdropView.layer.cornerCurve = kCACornerCurveContinuous;
     self.glassBackdropView.layer.masksToBounds = YES;
     self.glassBackdropView.clipsToBounds = YES;
+    self.glassBackdropView.userInteractionEnabled = NO; // DO NOT block touches
     
     // Apply Telegram's exact dark color matrix filter
     if (self.glassBackdropView.layer.sublayers.count > 0) {
@@ -118,7 +130,7 @@
             }
         }
     }
-    self.glassBackdropView.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.35];
+    self.glassBackdropView.backgroundColor = [UIColor colorWithWhite:0.14 alpha:0.40];
     [self.telegramGlassTitleView addSubview:self.glassBackdropView];
     
     // 2. Instantiate Apple _UILiquidLensView (exact Telegram LiquidLensView implementation)
@@ -130,9 +142,8 @@
             self.liquidLensView = ((id (*)(id, SEL, id))objc_msgSend)(allocObj, initSel, [[UIView alloc] init]);
             if (self.liquidLensView) {
                 self.liquidLensView.frame = self.telegramGlassTitleView.bounds;
-                self.liquidLensView.layer.zPosition = 10.0;
+                self.liquidLensView.userInteractionEnabled = NO; // DO NOT block touches
                 
-                // Configure Liquid Lens properties as in Telegram-iOS
                 SEL setLiftedModeSel = sel_registerName("setLiftedContentMode:");
                 if ([self.liquidLensView respondsToSelector:setLiftedModeSel]) {
                     ((void (*)(id, SEL, int32_t))objc_msgSend)(self.liquidLensView, setLiftedModeSel, 1);
@@ -153,38 +164,40 @@
     
     // 3. Sliding Pill Lens Highlight (Telegram Folder Indicator)
     self.slidingPillView = [[UIView alloc] initWithFrame:CGRectMake(2, 2, 114, 28)];
-    self.slidingPillView.backgroundColor = [UIColor colorWithWhite:0.34 alpha:0.80];
+    self.slidingPillView.backgroundColor = [UIColor colorWithWhite:0.34 alpha:0.85];
     self.slidingPillView.layer.cornerRadius = 14;
     self.slidingPillView.layer.cornerCurve = kCACornerCurveContinuous;
     self.slidingPillView.layer.shadowColor = [UIColor blackColor].CGColor;
     self.slidingPillView.layer.shadowRadius = 4;
     self.slidingPillView.layer.shadowOpacity = 0.25;
     self.slidingPillView.layer.shadowOffset = CGSizeMake(0, 1);
-    [self.glassBackdropView.contentView addSubview:self.slidingPillView];
+    self.slidingPillView.userInteractionEnabled = NO;
+    [self.telegramGlassTitleView addSubview:self.slidingPillView];
     
-    // 4. Tab 1: Dashboard
+    // 4. Tab 1: Dashboard (Top-most interactive layer)
     self.dashboardTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     self.dashboardTabBtn.frame = CGRectMake(0, 0, 118, 32);
     [self.dashboardTabBtn setTitle:@"Dashboard" forState:UIControlStateNormal];
     [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     [self.dashboardTabBtn addTarget:self action:@selector(selectDashboard) forControlEvents:UIControlEventTouchUpInside];
-    [self.glassBackdropView.contentView addSubview:self.dashboardTabBtn];
+    [self.telegramGlassTitleView addSubview:self.dashboardTabBtn];
     
     // Status Dot inside Dashboard
     self.liveStatusDot = [[UIView alloc] initWithFrame:CGRectMake(12, 13, 6, 6)];
     self.liveStatusDot.backgroundColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:1.0];
     self.liveStatusDot.layer.cornerRadius = 3;
+    self.liveStatusDot.userInteractionEnabled = NO;
     [self.dashboardTabBtn addSubview:self.liveStatusDot];
     
-    // 5. Tab 2: Console
+    // 5. Tab 2: Console (Top-most interactive layer)
     self.consoleTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     self.consoleTabBtn.frame = CGRectMake(118, 0, 118, 32);
     [self.consoleTabBtn setTitle:@"Console" forState:UIControlStateNormal];
     [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
     self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     [self.consoleTabBtn addTarget:self action:@selector(selectConsole) forControlEvents:UIControlEventTouchUpInside];
-    [self.glassBackdropView.contentView addSubview:self.consoleTabBtn];
+    [self.telegramGlassTitleView addSubview:self.consoleTabBtn];
     
     // Telegram-style Folder Badge Count
     self.consoleUnreadBadge = [[UILabel alloc] initWithFrame:CGRectMake(88, 8, 18, 16)];
@@ -195,7 +208,11 @@
     self.consoleUnreadBadge.backgroundColor = [UIColor colorWithRed:0.22 green:0.53 blue:0.95 alpha:0.90];
     self.consoleUnreadBadge.layer.cornerRadius = 8;
     self.consoleUnreadBadge.layer.masksToBounds = YES;
+    self.consoleUnreadBadge.userInteractionEnabled = NO;
     [self.consoleTabBtn addSubview:self.consoleUnreadBadge];
+    
+    [self.telegramGlassTitleView bringSubviewToFront:self.dashboardTabBtn];
+    [self.telegramGlassTitleView bringSubviewToFront:self.consoleTabBtn];
     
     self.navigationItem.titleView = self.telegramGlassTitleView;
 }
