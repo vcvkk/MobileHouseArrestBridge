@@ -3,20 +3,23 @@
 
 @interface GlassStatusViewController ()
 
-@property (nonatomic, strong) UIVisualEffectView *floatingGlassBar;
-@property (nonatomic, strong) UIView *segmentSelectionPill;
-@property (nonatomic, strong) UIButton *dashboardBtn;
-@property (nonatomic, strong) UIButton *consoleBtn;
-@property (nonatomic, assign) NSInteger currentSegmentIndex;
+// Liquid Glass Capsule Switcher
+@property (nonatomic, strong) UIVisualEffectView *glassCapsuleContainer;
+@property (nonatomic, strong) UIView *glassPillIndicator;
+@property (nonatomic, strong) UIButton *dashboardTabBtn;
+@property (nonatomic, strong) UIButton *consoleTabBtn;
+@property (nonatomic, assign) NSInteger selectedTab;
 
+// Content Views
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UIView *consoleContainer;
 @property (nonatomic, strong) UITextView *consoleTextView;
 @property (nonatomic, strong) NSMutableArray<NSString *> *logHistory;
 
+// Host Metadata
 @property (nonatomic, strong) NSString *deviceModel;
 @property (nonatomic, strong) NSString *osVersion;
-@property (nonatomic, strong) UIImpactFeedbackGenerator *hapticFeedback;
+@property (nonatomic, assign) NSUInteger activeClientsCount;
 
 @end
 
@@ -25,16 +28,17 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"HouseArrest";
-    self.view.backgroundColor = [UIColor blackColor]; // True OLED Black
+    
+    // True Black OLED Background
+    self.view.backgroundColor = [UIColor blackColor];
     self.logHistory = [NSMutableArray array];
-    self.currentSegmentIndex = 0;
-    self.hapticFeedback = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+    self.selectedTab = 0;
     
     [self loadSystemInfo];
     [self setupNavigationBar];
+    [self setupLiquidGlassSwitcher];
     [self setupTableView];
     [self setupConsoleView];
-    [self setupFloatingGlassSegmentedControl];
     
     [MHAServer sharedServer].delegate = self;
     
@@ -42,8 +46,8 @@
     if (![[MHAServer sharedServer] startOnPort:8080 error:&error]) {
         [self serverDidLogMessage:[NSString stringWithFormat:@"Failed to bind port 8080: %@", error.localizedDescription] isError:YES];
     } else {
-        [self serverDidLogMessage:@"MobileHouseArrest daemon online (0.0.0.0:8080)" isError:NO];
-        [self serverDidLogMessage:@"OLED Liquid Glass environment ready for USB bridge." isError:NO];
+        [self serverDidLogMessage:@"HouseArrest daemon listening on 0.0.0.0:8080" isError:NO];
+        [self serverDidLogMessage:@"USBMux bridge ready for incoming TCP connections." isError:NO];
     }
 }
 
@@ -54,138 +58,153 @@
     
     NSOperatingSystemVersion os = [[NSProcessInfo processInfo] operatingSystemVersion];
     self.osVersion = [NSString stringWithFormat:@"iOS %ld.%ld.%ld", (long)os.majorVersion, (long)os.minorVersion, (long)os.patchVersion];
+    self.activeClientsCount = 0;
 }
 
 - (void)setupNavigationBar {
     if (self.navigationController) {
         self.navigationController.navigationBar.prefersLargeTitles = YES;
-        self.navigationController.navigationBar.barStyle = UIBarStyleBlack;
-        self.navigationController.navigationBar.tintColor = [UIColor colorWithRed:0.25 green:0.85 blue:0.55 alpha:1.0];
+        self.navigationController.navigationBar.tintColor = [UIColor colorWithRed:0.20 green:0.85 blue:0.55 alpha:1.0];
+        
+        UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
+        [appearance configureWithOpaqueBackground];
+        appearance.backgroundColor = [UIColor blackColor];
+        appearance.shadowColor = [UIColor clearColor];
+        appearance.titleTextAttributes = @{NSForegroundColorAttributeName: [UIColor whiteColor]};
+        appearance.largeTitleTextAttributes = @{NSForegroundColorAttributeName: [UIColor whiteColor], NSFontAttributeName: [UIFont systemFontOfSize:32 weight:UIFontWeightBold]};
+        
+        self.navigationController.navigationBar.standardAppearance = appearance;
+        self.navigationController.navigationBar.scrollEdgeAppearance = appearance;
+        self.navigationController.navigationBar.compactAppearance = appearance;
         
         UIBarButtonItem *shareItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(shareLogs)];
         self.navigationItem.rightBarButtonItem = shareItem;
     }
 }
 
-#pragma mark - Native iOS 26 Liquid Glass Floating Segmented Picker
+#pragma mark - iOS 26 Liquid Glass Capsule Switcher
 
-- (void)setupFloatingGlassSegmentedControl {
-    UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
-    self.floatingGlassBar = [[UIVisualEffectView alloc] initWithEffect:blur];
-    self.floatingGlassBar.translatesAutoresizingMaskIntoConstraints = NO;
-    self.floatingGlassBar.layer.cornerRadius = 20;
-    self.floatingGlassBar.layer.masksToBounds = YES;
-    self.floatingGlassBar.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.16].CGColor;
-    self.floatingGlassBar.layer.borderWidth = 1.0;
-    [self.view addSubview:self.floatingGlassBar];
+- (void)setupLiquidGlassSwitcher {
+    // Outer floating Liquid Glass Capsule
+    UIBlurEffect *glassBlur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
+    self.glassCapsuleContainer = [[UIVisualEffectView alloc] initWithEffect:glassBlur];
+    self.glassCapsuleContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    self.glassCapsuleContainer.layer.cornerRadius = 23;
+    self.glassCapsuleContainer.layer.masksToBounds = YES;
+    self.glassCapsuleContainer.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
+    self.glassCapsuleContainer.layer.borderWidth = 1.0;
+    self.glassCapsuleContainer.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.10 alpha:0.55];
+    [self.view addSubview:self.glassCapsuleContainer];
     
-    // Sliding Selection Pill
-    self.segmentSelectionPill = [[UIView alloc] initWithFrame:CGRectZero];
-    self.segmentSelectionPill.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.18];
-    self.segmentSelectionPill.layer.cornerRadius = 16;
-    self.segmentSelectionPill.layer.masksToBounds = YES;
-    [self.floatingGlassBar.contentView addSubview:self.segmentSelectionPill];
+    // Morphing Glass Pill Indicator
+    self.glassPillIndicator = [[UIView alloc] init];
+    self.glassPillIndicator.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.16];
+    self.glassPillIndicator.layer.cornerRadius = 19;
+    self.glassPillIndicator.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.25].CGColor;
+    self.glassPillIndicator.layer.borderWidth = 1.0;
+    self.glassPillIndicator.layer.shadowColor = [UIColor colorWithWhite:1.0 alpha:0.20].CGColor;
+    self.glassPillIndicator.layer.shadowRadius = 8;
+    self.glassPillIndicator.layer.shadowOpacity = 0.5;
+    [self.glassCapsuleContainer.contentView addSubview:self.glassPillIndicator];
     
-    // Stack for Buttons
-    UIStackView *stack = [[UIStackView alloc] init];
-    stack.translatesAutoresizingMaskIntoConstraints = NO;
-    stack.axis = UILayoutConstraintAxisHorizontal;
-    stack.distribution = UIStackViewDistributionFillEqually;
-    stack.spacing = 4;
-    [self.floatingGlassBar.contentView addSubview:stack];
+    // Tab Buttons
+    self.dashboardTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    self.dashboardTabBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.dashboardTabBtn setTitle:@"Dashboard" forState:UIControlStateNormal];
+    [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    [self.dashboardTabBtn addTarget:self action:@selector(dashboardTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.glassCapsuleContainer.contentView addSubview:self.dashboardTabBtn];
     
-    self.dashboardBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.dashboardBtn setTitle:@"Dashboard" forState:UIControlStateNormal];
-    [self.dashboardBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    self.dashboardBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-    [self.dashboardBtn addTarget:self action:@selector(selectDashboard) forControlEvents:UIControlEventTouchUpInside];
-    [stack addArrangedSubview:self.dashboardBtn];
-    
-    self.consoleBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.consoleBtn setTitle:@"Console Logs" forState:UIControlStateNormal];
-    [self.consoleBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
-    self.consoleBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    [self.consoleBtn addTarget:self action:@selector(selectConsole) forControlEvents:UIControlEventTouchUpInside];
-    [stack addArrangedSubview:self.consoleBtn];
+    self.consoleTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    self.consoleTabBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.consoleTabBtn setTitle:@"Console Logs" forState:UIControlStateNormal];
+    [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
+    self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+    [self.consoleTabBtn addTarget:self action:@selector(consoleTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.glassCapsuleContainer.contentView addSubview:self.consoleTabBtn];
     
     UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [self.floatingGlassBar.topAnchor constraintEqualToAnchor:guide.topAnchor constant:6],
-        [self.floatingGlassBar.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [self.floatingGlassBar.widthAnchor constraintEqualToConstant:290],
-        [self.floatingGlassBar.heightAnchor constraintEqualToConstant:40],
+        [self.glassCapsuleContainer.topAnchor constraintEqualToAnchor:guide.topAnchor constant:6],
+        [self.glassCapsuleContainer.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [self.glassCapsuleContainer.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [self.glassCapsuleContainer.heightAnchor constraintEqualToConstant:46],
         
-        [stack.topAnchor constraintEqualToAnchor:self.floatingGlassBar.contentView.topAnchor constant:3],
-        [stack.leadingAnchor constraintEqualToAnchor:self.floatingGlassBar.contentView.leadingAnchor constant:4],
-        [stack.trailingAnchor constraintEqualToAnchor:self.floatingGlassBar.contentView.trailingAnchor constant:-4],
-        [stack.bottomAnchor constraintEqualToAnchor:self.floatingGlassBar.contentView.bottomAnchor constant:-3]
+        [self.dashboardTabBtn.leadingAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.leadingAnchor],
+        [self.dashboardTabBtn.topAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.topAnchor],
+        [self.dashboardTabBtn.bottomAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.bottomAnchor],
+        [self.dashboardTabBtn.widthAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.widthAnchor multiplier:0.5],
+        
+        [self.consoleTabBtn.trailingAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.trailingAnchor],
+        [self.consoleTabBtn.topAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.topAnchor],
+        [self.consoleTabBtn.bottomAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.bottomAnchor],
+        [self.consoleTabBtn.widthAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.widthAnchor multiplier:0.5]
     ]];
 }
 
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
-    [self updateSelectionPillAnimated:NO];
+    [self updatePillFrameAnimated:NO];
 }
 
-- (void)updateSelectionPillAnimated:(BOOL)animated {
-    CGFloat pillWidth = (290 - 8 - 4) / 2.0;
-    CGFloat pillHeight = 34;
-    CGFloat pillX = 4 + self.currentSegmentIndex * (pillWidth + 4);
-    CGRect targetFrame = CGRectMake(pillX, 3, pillWidth, pillHeight);
+- (void)updatePillFrameAnimated:(BOOL)animated {
+    CGFloat totalW = self.glassCapsuleContainer.bounds.size.width;
+    CGFloat h = self.glassCapsuleContainer.bounds.size.height;
+    if (totalW <= 0 || h <= 0) return;
+    
+    CGFloat pillW = (totalW / 2.0) - 8;
+    CGFloat pillH = h - 8;
+    CGFloat pillX = (self.selectedTab == 0) ? 4 : (totalW / 2.0) + 4;
+    CGRect targetRect = CGRectMake(pillX, 4, pillW, pillH);
     
     void (^animations)(void) = ^{
-        self.segmentSelectionPill.frame = targetFrame;
-        if (self.currentSegmentIndex == 0) {
-            [self.dashboardBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-            self.dashboardBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-            [self.consoleBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
-            self.consoleBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+        self.glassPillIndicator.frame = targetRect;
+        if (self.selectedTab == 0) {
+            [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+            [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
+            self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
         } else {
-            [self.dashboardBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
-            self.dashboardBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-            [self.consoleBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-            self.consoleBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+            [self.dashboardTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
+            self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+            [self.consoleTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
         }
     };
     
     if (animated) {
-        [UIView animateWithDuration:0.32 delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0 options:UIViewAnimationOptionCurveEaseInOut animations:animations completion:nil];
+        UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+        [haptic impactOccurred];
+        [UIView animateWithDuration:0.35 delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0.5 options:UIViewAnimationOptionCurveEaseInOut animations:animations completion:nil];
     } else {
         animations();
     }
 }
 
-- (void)selectDashboard {
-    if (self.currentSegmentIndex == 0) return;
-    self.currentSegmentIndex = 0;
-    [self.hapticFeedback impactOccurred];
-    [self updateSelectionPillAnimated:YES];
-    
-    [UIView transitionWithView:self.view duration:0.25 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{
-        self.tableView.hidden = NO;
-        self.consoleContainer.hidden = YES;
-    } completion:nil];
+- (void)dashboardTapped {
+    if (self.selectedTab == 0) return;
+    self.selectedTab = 0;
+    [self updatePillFrameAnimated:YES];
+    self.tableView.hidden = NO;
+    self.consoleContainer.hidden = YES;
 }
 
-- (void)selectConsole {
-    if (self.currentSegmentIndex == 1) return;
-    self.currentSegmentIndex = 1;
-    [self.hapticFeedback impactOccurred];
-    [self updateSelectionPillAnimated:YES];
-    
+- (void)consoleTapped {
+    if (self.selectedTab == 1) return;
+    self.selectedTab = 1;
+    [self updatePillFrameAnimated:YES];
+    self.tableView.hidden = YES;
+    self.consoleContainer.hidden = NO;
     [self refreshConsoleDisplay];
-    [UIView transitionWithView:self.view duration:0.25 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{
-        self.tableView.hidden = YES;
-        self.consoleContainer.hidden = NO;
-    } completion:nil];
 }
 
-#pragma mark - OLED TableView & Console Layout
+#pragma mark - True Black OLED TableView
 
 - (void)setupTableView {
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.tableView.backgroundColor = [UIColor blackColor]; // Pure OLED
+    self.tableView.backgroundColor = [UIColor blackColor];
     self.tableView.dataSource = self;
     self.tableView.delegate = self;
     self.tableView.separatorColor = [UIColor colorWithWhite:1.0 alpha:0.06];
@@ -193,35 +212,37 @@
     
     UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [self.tableView.topAnchor constraintEqualToAnchor:guide.topAnchor constant:54],
+        [self.tableView.topAnchor constraintEqualToAnchor:self.glassCapsuleContainer.bottomAnchor constant:10],
         [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [self.tableView.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor]
     ]];
 }
 
+#pragma mark - True Black Console Container
+
 - (void)setupConsoleView {
     self.consoleContainer = [[UIView alloc] init];
     self.consoleContainer.translatesAutoresizingMaskIntoConstraints = NO;
     self.consoleContainer.hidden = YES;
-    self.consoleContainer.backgroundColor = [UIColor blackColor]; // Pure OLED Black
+    self.consoleContainer.backgroundColor = [UIColor colorWithRed:0.04 green:0.04 blue:0.05 alpha:1.0];
     self.consoleContainer.layer.cornerRadius = 20;
     self.consoleContainer.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.12].CGColor;
     self.consoleContainer.layer.borderWidth = 1.0;
     self.consoleContainer.layer.masksToBounds = YES;
     [self.view addSubview:self.consoleContainer];
     
-    // Top Bar inside console with Liquid Glass Clear Button
+    // Top Bar inside console with Clear Button
     UIView *topBar = [[UIView alloc] init];
     topBar.translatesAutoresizingMaskIntoConstraints = NO;
-    topBar.backgroundColor = [UIColor colorWithRed:0.08 green:0.09 blue:0.12 alpha:1.0];
+    topBar.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.10 alpha:1.0];
     [self.consoleContainer addSubview:topBar];
     
     UILabel *lbl = [[UILabel alloc] init];
     lbl.translatesAutoresizingMaskIntoConstraints = NO;
-    lbl.text = @"AUDIT CONSOLE";
+    lbl.text = @"AUDIT TRAIL";
     lbl.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightBold];
-    lbl.textColor = [UIColor colorWithWhite:0.50 alpha:1.0];
+    lbl.textColor = [UIColor colorWithWhite:0.55 alpha:1.0];
     [topBar addSubview:lbl];
     
     UIButton *clearBtn = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -234,16 +255,16 @@
     
     self.consoleTextView = [[UITextView alloc] init];
     self.consoleTextView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.consoleTextView.backgroundColor = [UIColor blackColor];
-    self.consoleTextView.textColor = [UIColor colorWithRed:0.35 green:0.85 blue:0.60 alpha:1.0];
+    self.consoleTextView.backgroundColor = [UIColor clearColor];
+    self.consoleTextView.textColor = [UIColor colorWithRed:0.35 green:0.90 blue:0.65 alpha:1.0];
     self.consoleTextView.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
     self.consoleTextView.editable = NO;
-    self.consoleTextView.textContainerInset = UIEdgeInsetsMake(12, 12, 12, 12);
+    self.consoleTextView.textContainerInset = UIEdgeInsetsMake(14, 14, 14, 14);
     [self.consoleContainer addSubview:self.consoleTextView];
     
     UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [self.consoleContainer.topAnchor constraintEqualToAnchor:guide.topAnchor constant:54],
+        [self.consoleContainer.topAnchor constraintEqualToAnchor:self.glassCapsuleContainer.bottomAnchor constant:12],
         [self.consoleContainer.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [self.consoleContainer.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
         [self.consoleContainer.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor constant:-12],
@@ -290,7 +311,7 @@
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"MHAOLEDCell"];
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"MHAOLEDCell"];
-        cell.backgroundColor = [UIColor colorWithRed:0.08 green:0.09 blue:0.12 alpha:1.0]; // Deep Obsidian OLED Cell
+        cell.backgroundColor = [UIColor colorWithRed:0.07 green:0.07 blue:0.09 alpha:1.0];
         cell.textLabel.textColor = [UIColor whiteColor];
         cell.textLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightRegular];
         cell.detailTextLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
@@ -301,7 +322,7 @@
         if (indexPath.row == 0) {
             cell.textLabel.text = @"Daemon State";
             cell.detailTextLabel.text = [MHAServer sharedServer].isRunning ? @"Listening" : @"Stopped";
-            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.25 green:0.85 blue:0.55 alpha:1.0];
+            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:1.0];
         } else if (indexPath.row == 1) {
             cell.textLabel.text = @"Listen Address";
             cell.detailTextLabel.text = @"0.0.0.0:8080";
@@ -315,15 +336,15 @@
         if (indexPath.row == 0) {
             cell.textLabel.text = @"App Data (Class 2)";
             cell.detailTextLabel.text = @"Read / Write";
-            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.35 green:0.85 blue:0.55 alpha:1.0];
+            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.35 green:0.90 blue:0.60 alpha:1.0];
         } else if (indexPath.row == 1) {
             cell.textLabel.text = @"App Groups (Class 7)";
             cell.detailTextLabel.text = @"Read / Write";
-            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.35 green:0.85 blue:0.55 alpha:1.0];
+            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.35 green:0.90 blue:0.60 alpha:1.0];
         } else if (indexPath.row == 2) {
             cell.textLabel.text = @"System Groups (Class 13)";
             cell.detailTextLabel.text = @"MobileGestalt Cache";
-            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.35 green:0.85 blue:0.55 alpha:1.0];
+            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.35 green:0.90 blue:0.60 alpha:1.0];
         }
     } else if (indexPath.section == 2) {
         if (indexPath.row == 0) {
@@ -367,6 +388,7 @@
 }
 
 - (void)serverClientCountDidChange:(NSUInteger)count {
+    self.activeClientsCount = count;
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.tableView reloadData];
     });
