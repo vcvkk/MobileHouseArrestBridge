@@ -51,8 +51,8 @@ static MCMAPI *MCMGetAPI(void) {
         api.objectGetPath = (MCMObjectGetPath)dlsym(h, "container_object_get_path");
         api.objectCopyToken = (MCMObjectCopyToken)dlsym(h, "container_object_copy_sandbox_token");
         api.objectFree = (MCMObjectFree)dlsym(h, "container_free_object");
-        api.errorGetInt = (MCMErrorGetInt)dlsym(h, "container_error_get_posix_errno");
-        api.errorGetString = (MCMErrorGetString)dlsym(h, "container_error_get_path");
+        api.errorGetPOSIX = (MCMErrorGetInt)dlsym(h, "container_error_get_posix_errno");
+        api.errorGetMessage = (MCMErrorGetString)dlsym(h, "container_error_get_path");
     });
     return &api;
 }
@@ -92,7 +92,7 @@ static MCMAPI *MCMGetAPI(void) {
     void *obj = api->queryGetSingle(query);
     if (!obj) {
         void *errObj = api->queryGetLastError ? api->queryGetLastError(query) : NULL;
-        int errCode = (errObj && api->errorGetInt) ? api->errorGetInt(errObj) : -1;
+        int errCode = (errObj && api->errorGetPOSIX) ? api->errorGetPOSIX(errObj) : -1;
         if (error) *error = [NSString stringWithFormat:@"Failed to find container for %@ (posix error %d)", identifier, errCode];
         api->queryFree(query);
         return nil;
