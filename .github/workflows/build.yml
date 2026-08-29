@@ -1,0 +1,48 @@
+name: Build iOS Binary & IPA
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compile iOS Binary
+        run: |
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "Using iPhoneOS SDK at: $SDK_PATH"
+          xcrun -sdk iphoneos clang -arch arm64 -arch arm64e \
+            -isysroot "$SDK_PATH" \
+            -miphoneos-version-min=15.0 \
+            -fobjc-arc \
+            -framework Foundation \
+            -o MobileHouseArrestBridge \
+            main.m MCMBridge.m
+          
+          # Ad-hoc codesign with required identifier
+          codesign -s - --identifier com.apple.mobile.MobileHouseArrest MobileHouseArrestBridge
+          file MobileHouseArrestBridge
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload/MobileHouseArrestBridge.app
+          cp MobileHouseArrestBridge Payload/MobileHouseArrestBridge.app/
+          cp Info.plist Payload/MobileHouseArrestBridge.app/
+          codesign -s - --identifier com.apple.mobile.MobileHouseArrest Payload/MobileHouseArrestBridge.app
+          zip -r MobileHouseArrestBridge.ipa Payload
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MobileHouseArrestBridge-Artifacts
+          path: |
+            MobileHouseArrestBridge
+            MobileHouseArrestBridge.ipa
