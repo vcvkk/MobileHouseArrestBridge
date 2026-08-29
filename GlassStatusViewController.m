@@ -9,18 +9,18 @@
 
 @implementation TelegramTitleBar
 - (CGSize)intrinsicContentSize {
-    return CGSizeMake(236.0, 32.0);
+    return CGSizeMake(240.0, 34.0);
 }
 @end
 
 @interface GlassStatusViewController () <UIScrollViewDelegate>
 
-// Telegram-iOS Liquid Glass Title Navigation
+// Apple Native Liquid Glass Navigation
 @property (nonatomic, strong) TelegramTitleBar *telegramGlassTitleView;
-@property (nonatomic, strong) UIVisualEffectView *capsuleBackdropView;
+@property (nonatomic, strong) UIVisualEffectView *capsuleGlassContainer;
 @property (nonatomic, strong) UIView *slidingPillContainer;
-@property (nonatomic, strong) UIVisualEffectView *slidingPillGlassBlur;
-@property (nonatomic, strong) CAGradientLayer *specularShineLayer;
+@property (nonatomic, strong) UIVisualEffectView *slidingPillGlassView;
+@property (nonatomic, strong) CAGradientLayer *specularCausticLayer;
 @property (nonatomic, strong) UIButton *dashboardTabBtn;
 @property (nonatomic, strong) UIButton *consoleTabBtn;
 @property (nonatomic, strong) UILabel *consoleUnreadBadge;
@@ -45,12 +45,12 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     
-    // OLED True Black Canvas
+    // OLED True Black Canvas with Ambient Depth
     self.view.backgroundColor = [UIColor blackColor];
     self.logHistory = [NSMutableArray array];
     
     [self loadSystemInfo];
-    [self setupTelegramLiquidGlassNavigationBar];
+    [self setupAppleLiquidGlassNavigationBar];
     [self setupFullscreenPaging];
     
     [MHAServer sharedServer].delegate = self;
@@ -74,17 +74,33 @@
     self.activeClientsCount = 0;
 }
 
-#pragma mark - Telegram-iOS Liquid Glass Navigation TitleView
+#pragma mark - Apple Official Liquid Glass API Navigation Header
 
-- (void)setupTelegramLiquidGlassNavigationBar {
+- (UIVisualEffect *)createAppleGlassEffectWithStyle:(NSInteger)style {
+    // 1. Try Apple Official iOS 26+ UIGlassEffect
+    Class glassClass = NSClassFromString(@"UIGlassEffect");
+    if (glassClass) {
+        if ([glassClass respondsToSelector:sel_registerName("effectWithStyle:")]) {
+            id effect = ((id (*)(id, SEL, NSInteger))objc_msgSend)(glassClass, sel_registerName("effectWithStyle:"), style);
+            if (effect) return effect;
+        }
+        id effect = [[glassClass alloc] init];
+        if (effect) return effect;
+    }
+    
+    // 2. High-Fidelity Fallback
+    return [UIBlurEffect effectWithStyle:style == 0 ? UIBlurEffectStyleSystemUltraThinMaterialDark : UIBlurEffectStyleLight];
+}
+
+- (void)setupAppleLiquidGlassNavigationBar {
     if (!self.navigationController) return;
     
     self.navigationController.navigationBar.prefersLargeTitles = NO;
     self.navigationController.navigationBar.tintColor = [UIColor colorWithRed:0.22 green:0.53 blue:0.95 alpha:1.0];
     
     UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
-    [appearance configureWithOpaqueBackground];
-    appearance.backgroundColor = [UIColor blackColor];
+    [appearance configureWithTransparentBackground];
+    appearance.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.85];
     appearance.shadowColor = [UIColor clearColor];
     self.navigationController.navigationBar.standardAppearance = appearance;
     self.navigationController.navigationBar.scrollEdgeAppearance = appearance;
@@ -94,62 +110,61 @@
     UIBarButtonItem *shareItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(shareLogs)];
     self.navigationItem.rightBarButtonItem = shareItem;
     
-    // 1. Root Title Container (236 x 32)
-    self.telegramGlassTitleView = [[TelegramTitleBar alloc] initWithFrame:CGRectMake(0, 0, 236, 32)];
+    // 1. TitleView Root View (240 x 34)
+    self.telegramGlassTitleView = [[TelegramTitleBar alloc] initWithFrame:CGRectMake(0, 0, 240, 34)];
     self.telegramGlassTitleView.userInteractionEnabled = YES;
     self.telegramGlassTitleView.clipsToBounds = NO;
     
-    // 2. Outer Frosted Glass Capsule Backdrop
-    UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterialDark];
-    self.capsuleBackdropView = [[UIVisualEffectView alloc] initWithEffect:blur];
-    self.capsuleBackdropView.frame = self.telegramGlassTitleView.bounds;
-    self.capsuleBackdropView.layer.cornerRadius = 16;
-    self.capsuleBackdropView.layer.cornerCurve = kCACornerCurveContinuous;
-    self.capsuleBackdropView.layer.masksToBounds = YES;
-    self.capsuleBackdropView.userInteractionEnabled = NO;
-    self.capsuleBackdropView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.08];
-    self.capsuleBackdropView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.16].CGColor;
-    self.capsuleBackdropView.layer.borderWidth = 0.5;
-    [self.telegramGlassTitleView addSubview:self.capsuleBackdropView];
+    // 2. Apple UIGlassEffect Container Capsule
+    UIVisualEffect *containerGlass = [self createAppleGlassEffectWithStyle:0]; // .regular
+    self.capsuleGlassContainer = [[UIVisualEffectView alloc] initWithEffect:containerGlass];
+    self.capsuleGlassContainer.frame = self.telegramGlassTitleView.bounds;
+    self.capsuleGlassContainer.layer.cornerRadius = 17;
+    self.capsuleGlassContainer.layer.cornerCurve = kCACornerCurveContinuous;
+    self.capsuleGlassContainer.layer.masksToBounds = YES;
+    self.capsuleGlassContainer.userInteractionEnabled = NO;
+    self.capsuleGlassContainer.backgroundColor = [UIColor colorWithWhite:0.20 alpha:0.35];
+    self.capsuleGlassContainer.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.20].CGColor;
+    self.capsuleGlassContainer.layer.borderWidth = 0.5;
+    [self.telegramGlassTitleView addSubview:self.capsuleGlassContainer];
     
-    // 3. Sliding Liquid Glass Pill Container (Active Tab Indicator)
-    self.slidingPillContainer = [[UIView alloc] initWithFrame:CGRectMake(2, 2, 114, 28)];
+    // 3. Apple UIGlassEffect Active Sliding Pill Indicator (Concentric Curvature r=14)
+    self.slidingPillContainer = [[UIView alloc] initWithFrame:CGRectMake(3, 3, 114, 28)];
     self.slidingPillContainer.layer.cornerRadius = 14;
     self.slidingPillContainer.layer.cornerCurve = kCACornerCurveContinuous;
     self.slidingPillContainer.layer.masksToBounds = YES;
     self.slidingPillContainer.userInteractionEnabled = NO;
     
-    // Frosted Glass Blur inside Pill
-    UIBlurEffect *pillBlur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleLight];
-    self.slidingPillGlassBlur = [[UIVisualEffectView alloc] initWithEffect:pillBlur];
-    self.slidingPillGlassBlur.frame = self.slidingPillContainer.bounds;
-    self.slidingPillGlassBlur.layer.cornerRadius = 14;
-    self.slidingPillGlassBlur.layer.cornerCurve = kCACornerCurveContinuous;
-    self.slidingPillGlassBlur.layer.masksToBounds = YES;
-    self.slidingPillGlassBlur.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.25];
-    self.slidingPillGlassBlur.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.45].CGColor;
-    self.slidingPillGlassBlur.layer.borderWidth = 0.75;
-    [self.slidingPillContainer addSubview:self.slidingPillGlassBlur];
+    UIVisualEffect *pillGlass = [self createAppleGlassEffectWithStyle:1]; // .clear / interactive
+    self.slidingPillGlassView = [[UIVisualEffectView alloc] initWithEffect:pillGlass];
+    self.slidingPillGlassView.frame = self.slidingPillContainer.bounds;
+    self.slidingPillGlassView.layer.cornerRadius = 14;
+    self.slidingPillGlassView.layer.cornerCurve = kCACornerCurveContinuous;
+    self.slidingPillGlassView.layer.masksToBounds = YES;
+    self.slidingPillGlassView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.30];
+    self.slidingPillGlassView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.50].CGColor;
+    self.slidingPillGlassView.layer.borderWidth = 0.8;
+    [self.slidingPillContainer addSubview:self.slidingPillGlassView];
     
-    // Specular Light Caustic Shine (45-degree incident refraction)
-    self.specularShineLayer = [CAGradientLayer layer];
-    self.specularShineLayer.frame = self.slidingPillContainer.bounds;
-    self.specularShineLayer.colors = @[
-        (id)[UIColor colorWithWhite:1.0 alpha:0.55].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.06].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.28].CGColor
+    // 45-degree Specular Light Caustic Shine Layer
+    self.specularCausticLayer = [CAGradientLayer layer];
+    self.specularCausticLayer.frame = self.slidingPillContainer.bounds;
+    self.specularCausticLayer.colors = @[
+        (id)[UIColor colorWithWhite:1.0 alpha:0.60].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.08].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.35].CGColor
     ];
-    self.specularShineLayer.startPoint = CGPointMake(0.0, 0.0);
-    self.specularShineLayer.endPoint = CGPointMake(1.0, 1.0);
-    self.specularShineLayer.cornerRadius = 14;
-    self.specularShineLayer.cornerCurve = kCACornerCurveContinuous;
-    [self.slidingPillGlassBlur.contentView.layer addSublayer:self.specularShineLayer];
+    self.specularCausticLayer.startPoint = CGPointMake(0.0, 0.0);
+    self.specularCausticLayer.endPoint = CGPointMake(1.0, 1.0);
+    self.specularCausticLayer.cornerRadius = 14;
+    self.specularCausticLayer.cornerCurve = kCACornerCurveContinuous;
+    [self.slidingPillGlassView.contentView.layer addSublayer:self.specularCausticLayer];
     
     [self.telegramGlassTitleView addSubview:self.slidingPillContainer];
     
     // 4. Tab 1: Dashboard Button
     self.dashboardTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    self.dashboardTabBtn.frame = CGRectMake(0, 0, 118, 32);
+    self.dashboardTabBtn.frame = CGRectMake(0, 0, 120, 34);
     [self.dashboardTabBtn setTitle:@"Dashboard" forState:UIControlStateNormal];
     [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
@@ -157,7 +172,7 @@
     [self.telegramGlassTitleView addSubview:self.dashboardTabBtn];
     
     // Status Dot inside Dashboard
-    self.liveStatusDot = [[UIView alloc] initWithFrame:CGRectMake(12, 13, 6, 6)];
+    self.liveStatusDot = [[UIView alloc] initWithFrame:CGRectMake(12, 14, 6, 6)];
     self.liveStatusDot.backgroundColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:1.0];
     self.liveStatusDot.layer.cornerRadius = 3;
     self.liveStatusDot.userInteractionEnabled = NO;
@@ -165,15 +180,15 @@
     
     // 5. Tab 2: Console Button
     self.consoleTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    self.consoleTabBtn.frame = CGRectMake(118, 0, 118, 32);
+    self.consoleTabBtn.frame = CGRectMake(120, 0, 120, 34);
     [self.consoleTabBtn setTitle:@"Console" forState:UIControlStateNormal];
-    [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
+    [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
     self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     [self.consoleTabBtn addTarget:self action:@selector(selectConsole) forControlEvents:UIControlEventTouchUpInside];
     [self.telegramGlassTitleView addSubview:self.consoleTabBtn];
     
-    // Telegram-style Folder Badge Count
-    self.consoleUnreadBadge = [[UILabel alloc] initWithFrame:CGRectMake(88, 8, 18, 16)];
+    // Telegram-style Badge Count
+    self.consoleUnreadBadge = [[UILabel alloc] initWithFrame:CGRectMake(90, 9, 18, 16)];
     self.consoleUnreadBadge.text = @"0";
     self.consoleUnreadBadge.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightBold];
     self.consoleUnreadBadge.textColor = [UIColor whiteColor];
@@ -306,16 +321,16 @@
         progress = fmax(0.0, fmin(1.0, progress));
         
         CGFloat pillWidth = 114.0;
-        CGFloat pillX = 2.0 + (progress * 118.0);
-        self.slidingPillContainer.frame = CGRectMake(pillX, 2.0, pillWidth, 28.0);
+        CGFloat pillX = 3.0 + (progress * 120.0);
+        self.slidingPillContainer.frame = CGRectMake(pillX, 3.0, pillWidth, 28.0);
         
         if (progress < 0.5) {
             [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
             self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-            [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
+            [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
             self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         } else {
-            [self.dashboardTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
+            [self.dashboardTabBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
             self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
             [self.consoleTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
             self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
