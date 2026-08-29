@@ -1,69 +1,86 @@
-# MobileHouseArrest Bridge (PoC Test App)
+# MobileHouseArrest Bridge (`mha-cli`)
 
-Этот проект демонстрирует возможность использования эксплоита **MobileHouseArrest** в связке с компьютером (ПК / Mac) по схеме **Клиент – Сервер**.
-
----
-
-## Архитектура решения
-
-1. **iOS Companion (Сервер):**
-   - Написан на Objective-C.
-   - Подписан с идентификатором `com.apple.mobile.MobileHouseArrest`.
-   - При запуске подгружает `/usr/lib/system/libsystem_containermanager.dylib`, обращается к `containermanagerd` и забирает токены расширения песочницы (`sandbox_extension_consume`) для запрашиваемых контейнеров (Class 2, Class 7, Class 13).
-   - Поднимает TCP-сервер на порту `8080` для приема команд.
-
-2. **PC Tool (`client.py`):**
-   - Скрипт на Python, запускаемый на компьютере.
-   - Подключается к iPhone по USB через проброшенный порт (`iproxy 8080 8080`).
-   - Позволяет в интерактивном режиме с ПК вызывать активацию контейнеров, просматривать файлы (`ls`), скачивать (`get`) и перезаписывать (`put`) файлы.
+A toolchain and client-server bridge exploiting the **MobileHouseArrest** vulnerability on iOS to provide arbitrary container sandbox escape, application enumeration, and interactive remote filesystem management from a PC.
 
 ---
 
-## Инструкция по сборке и запуску
+## Architecture Overview
 
-### Шаг 1. Сборка для iOS
-Соберите бинарник или оберните его в приложение с помощью Xcode или Theos:
+* **iOS Companion Daemon (`MobileHouseArrestBridge`):**
+  * Operates on iOS with `CFBundleIdentifier` / `CodeDirectory` identity set to `com.apple.mobile.MobileHouseArrest`.
+  * Communicates directly with `containermanagerd` via `/usr/lib/system/libsystem_containermanager.dylib`.
+  * Dynamically consumes sandbox extensions (`sandbox_extension_consume`) for requested Application Containers (`Class 2`), App Groups (`Class 7`), and System Groups (`Class 13`).
+  * Uses `LSApplicationWorkspace` (LaunchServices) to discover all installed system and user applications and their storage paths.
+  * Runs a multi-threaded TCP daemon on port `8080`.
+
+* **PC Client (`client.py` / `mha-cli`):**
+  * A CLI client written in Python (zero external dependencies).
+  * Connects over USB port-forwarding (`iproxy 8080 8080`).
+  * Provides command-line subcommands with formatted table output, filtering, and JSON export.
+
+---
+
+## Quick Start
+
+### 1. Build and Install iOS Daemon
+Download the prebuilt `MobileHouseArrestBridge.ipa` from the [GitHub Actions Releases / Artifacts](https://github.com/vcvkk/MobileHouseArrestBridge/actions) and install it on your device using TrollStore, AltStore, or Sideloadly.
+
+Or build manually via Xcode / Theos:
 ```bash
 make
 ```
 
-### Шаг 2. Подпись (Критически важный момент)
-При упаковке в IPA укажите `CFBundleIdentifier` / `CodeDirectory Identifier`:
-```text
-com.apple.mobile.MobileHouseArrest
-```
-*Установите IPA на устройство с помощью TrollStore, Sideloadly или AltStore.*
-
-### Шаг 3. Запуск и проброс порта по USB
-1. Запустите приложение `MobileHouseArrestBridge` на iPhone.
-2. На компьютере выполните команду проброса порта через `usbmuxd` / `libimobiledevice`:
+### 2. Forward USB Port
+With your iOS device connected over USB, establish a tunnel using `iproxy` (part of `libimobiledevice` / `usbmuxd`):
 ```bash
 iproxy 8080 8080
 ```
 
-### Шаг 4. Управление с ПК через `client.py`
+### 3. Launch App and Use CLI
 
-* **Проверка связи:**
+#### Check Daemon Connectivity
 ```bash
 python3 client.py ping
 ```
 
-* **Активация доступа к контейнеру (например, приложению «Телефон»):**
+#### Enumerate Installed Applications & Containers
 ```bash
-python3 client.py activate --class-id 2 com.apple.mobilephone
+# List all applications with their container sandbox status
+python3 client.py apps list
+
+# List user-installed apps only
+python3 client.py apps list --user-only
+
+# Search by name or bundle identifier
+python3 client.py apps list --filter telegram
+
+# Export application list to JSON
+python3 client.py apps list --json > apps.json
 ```
 
-* **Просмотр директории внутри полученного пути:**
+#### Activate & Escape Sandbox for Target Container
 ```bash
-python3 client.py ls /private/var/mobile/Containers/Data/Application/<UUID>/Library/Caches/
+# Activate App Data container (Class 2)
+python3 client.py container activate -c 2 com.apple.mobilenotes
+
+# Activate App Group container (Class 7)
+python3 client.py container activate -c 7 -g group.com.apple.notes
+
+# Activate System Group (Class 13) - MobileGestalt Cache
+python3 client.py container activate -c 13 systemgroup.com.apple.mobilegestaltcache
 ```
 
-* **Скачивание файла на ПК:**
+#### Remote Filesystem Management
 ```bash
-python3 client.py get /private/var/mobile/Containers/Data/Application/<UUID>/Documents/database.sqlite ./local_copy.sqlite
-```
+# Detailed directory listing
+python3 client.py fs ls /private/var/mobile/Containers/Data/Application/<UUID>/ -l
 
-* **Заливка измененного файла с ПК на iPhone:**
-```bash
-python3 client.py put ./local_copy.sqlite /private/var/mobile/Containers/Data/Application/<UUID>/Documents/database.sqlite
+# View file content directly in terminal
+python3 client.py fs cat /private/var/mobile/Containers/Data/Application/<UUID>/Library/Preferences/com.app.plist
+
+# Pull/download file from iOS device
+python3 client.py fs pull /private/var/mobile/Containers/Data/Application/<UUID>/Documents/database.sqlite ./database.sqlite
+
+# Push/upload modified file to iOS device
+python3 client.py fs push ./modified.sqlite /private/var/mobile/Containers/Data/Application/<UUID>/Documents/database.sqlite
 ```

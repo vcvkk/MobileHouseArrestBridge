@@ -2,6 +2,8 @@
 #import <dlfcn.h>
 #import <stdlib.h>
 #import <xpc/xpc.h>
+#import <objc/runtime.h>
+#import <objc/message.h>
 
 typedef void *(*MCMQueryCreate)(void);
 typedef void (*MCMQuerySetU64)(void *, uint64_t);
@@ -86,14 +88,14 @@ static MCMAPI *MCMGetAPI(void) {
     }
 
     if (api->querySetFlags) {
-        api->querySetFlags(query, 0x900000000ULL); // Standard lookup flags
+        api->querySetFlags(query, 0x900000000ULL);
     }
 
     void *obj = api->queryGetSingle(query);
     if (!obj) {
         void *errObj = api->queryGetLastError ? api->queryGetLastError(query) : NULL;
         int errCode = (errObj && api->errorGetPOSIX) ? api->errorGetPOSIX(errObj) : -1;
-        if (error) *error = [NSString stringWithFormat:@"Failed to find container for %@ (posix error %d)", identifier, errCode];
+        if (error) *error = [NSString stringWithFormat:@"Container not found for %@ (posix errno %d)", identifier, errCode];
         api->queryFree(query);
         return nil;
     }
@@ -101,7 +103,6 @@ static MCMAPI *MCMGetAPI(void) {
     const char *rawPath = api->objectGetPath ? api->objectGetPath(obj) : NULL;
     NSString *path = rawPath ? [NSString stringWithUTF8String:rawPath] : nil;
 
-    // Grab sandbox extension token and consume it
     if (api->objectCopyToken) {
         char *token = api->objectCopyToken(obj);
         if (token) {
@@ -115,6 +116,84 @@ static MCMAPI *MCMGetAPI(void) {
     api->queryFree(query);
 
     return path;
+}
+
++ (NSArray<NSDictionary *> *)listAllApplicationsWithError:(NSString * _Nullable * _Nullable)error {
+    NSMutableArray<NSDictionary *> *results = [NSMutableArray array];
+
+    Class workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
+    if (!workspaceClass) {
+        // Fallback: try loading MobileCoreServices framework
+        dlopen("/System/Library/Frameworks/CoreServices.framework/CoreServices", RTLD_NOW);
+        dlopen("/System/Library/PrivateFrameworks/MobileCoreServices.framework/MobileCoreServices", RTLD_NOW);
+        workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
+    }
+
+    if (!workspaceClass) {
+        if (error) *error = @"LSApplicationWorkspace class not available on this iOS build";
+        return @[];
+    }
+
+    id workspace = ((id (*)(id, SEL))objc_msgSend)(workspaceClass, sel_registerName("defaultWorkspace"));
+    if (!workspace) {
+        if (error) *error = @"Failed to obtain default LSApplicationWorkspace instance";
+        return @[];
+    }
+
+    NSArray *apps = ((id (*)(id, SEL))objc_msgSend)(workspace, sel_registerName("allApplications"));
+    if (!apps || ![apps isKindOfClass:[NSArray class]]) {
+        if (error) *error = @"allApplications query returned empty or invalid result";
+        return @[];
+    }
+
+    for (id proxy in apps) {
+        NSString *bundleId = nil;
+        if ([proxy respondsToSelector:sel_registerName("applicationIdentifier")]) {
+            bundleId = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("applicationIdentifier"));
+        } else if ([proxy respondsToSelector:sel_registerName("bundleIdentifier")]) {
+            bundleId = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("bundleIdentifier"));
+        }
+
+        if (!bundleId || bundleId.length == 0) continue;
+
+        NSString *name = nil;
+        if ([proxy respondsToSelector:sel_registerName("localizedName")]) {
+            name = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("localizedName"));
+        }
+        if (!name || name.length == 0) {
+            name = bundleId;
+        }
+
+        NSString *version = @"";
+        if ([proxy respondsToSelector:sel_registerName("shortVersionString")]) {
+            version = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("shortVersionString")) ?: @"";
+        }
+
+        NSString *appType = @"User";
+        if ([proxy respondsToSelector:sel_registerName("bundleType")]) {
+            NSString *bt = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("bundleType"));
+            if ([bt isEqualToString:@"System"] || [bt isEqualToString:@"Hidden"]) {
+                appType = bt;
+            }
+        }
+
+        // Try to obtain the data container path using MCM
+        NSString *containerPath = [self resolveAndActivateContainerClass:2 identifier:bundleId isGroup:NO error:nil] ?: @"";
+
+        [results addObject:@{
+            @"name": name,
+            @"bundle_id": bundleId,
+            @"version": version,
+            @"type": appType,
+            @"container_path": containerPath
+        }];
+    }
+
+    [results sortUsingComparator:^NSComparisonResult(NSDictionary *obj1, NSDictionary *obj2) {
+        return [obj1[@"name"] localizedCaseInsensitiveCompare:obj2[@"name"]];
+    }];
+
+    return results;
 }
 
 @end

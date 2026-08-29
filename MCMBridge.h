@@ -17,6 +17,9 @@ extern int sandbox_extension_release(int64_t token);
                                                 isGroup:(BOOL)isGroup
                                                   error:(NSString * _Nullable * _Nullable)error;
 
+/// Enumerate all installed applications via LaunchServices and resolve their data container paths.
++ (NSArray<NSDictionary *> *)listAllApplicationsWithError:(NSString * _Nullable * _Nullable)error;
+
 @end
 
 NS_ASSUME_NONNULL_END
