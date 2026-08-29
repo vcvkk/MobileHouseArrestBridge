@@ -10,8 +10,10 @@ typedef void (*MCMQuerySetU64)(void *, uint64_t);
 typedef void (*MCMQuerySetXPC)(void *, xpc_object_t);
 typedef void (*MCMQuerySetCString)(void *, const char *);
 typedef void *(*MCMQueryGetPointer)(void *);
+typedef bool (*MCMQueryIterate)(void *, bool (^)(void *));
 typedef void (*MCMQueryFree)(void *);
 typedef const char *(*MCMObjectGetPath)(void *);
+typedef const char *(*MCMObjectGetIdentifier)(void *);
 typedef char *(*MCMObjectCopyToken)(void *);
 typedef bool (*MCMObjectActivate)(void *, bool);
 typedef void *(*MCMObjectCopy)(void *);
@@ -29,9 +31,11 @@ typedef struct {
     MCMQuerySetU64 querySetPart;
     MCMQueryGetPointer queryGetSingle;
     MCMQueryGetPointer queryGetLastError;
+    MCMQueryIterate queryIterate;
     MCMQueryFree queryFree;
     MCMObjectCopy objectCopy;
     MCMObjectGetPath objectGetPath;
+    MCMObjectGetIdentifier objectGetIdentifier;
     MCMObjectCopyToken objectCopyToken;
     MCMObjectActivate objectActivate;
     MCMObjectFree objectFree;
@@ -53,9 +57,12 @@ static MCMAPI *MCMGetAPI(void) {
         api.querySetPart = (MCMQuerySetU64)dlsym(h, "container_query_operation_set_part");
         api.queryGetSingle = (MCMQueryGetPointer)dlsym(h, "container_query_get_single_result");
         api.queryGetLastError = (MCMQueryGetPointer)dlsym(h, "container_query_get_last_error");
+        api.queryIterate = (MCMQueryIterate)dlsym(h, "container_query_iterate_results_with_subquery_count");
+        if (!api.queryIterate) api.queryIterate = (MCMQueryIterate)dlsym(h, "container_query_iterate_results_sync");
         api.queryFree = (MCMQueryFree)dlsym(h, "container_query_free");
         api.objectCopy = (MCMObjectCopy)dlsym(h, "container_object_copy");
         api.objectGetPath = (MCMObjectGetPath)dlsym(h, "container_object_get_path");
+        api.objectGetIdentifier = (MCMObjectGetIdentifier)dlsym(h, "container_object_get_identifier");
         api.objectCopyToken = (MCMObjectCopyToken)dlsym(h, "container_copy_sandbox_token");
         api.objectActivate = (MCMObjectActivate)dlsym(h, "container_object_sandbox_extension_activate");
         api.objectFree = (MCMObjectFree)dlsym(h, "container_object_free");
@@ -146,78 +153,79 @@ static MCMAPI *MCMGetAPI(void) {
 
 + (NSArray<NSDictionary *> *)listAllApplicationsWithError:(NSString * _Nullable * _Nullable)error {
     NSMutableArray<NSDictionary *> *results = [NSMutableArray array];
+    MCMAPI *api = MCMGetAPI();
 
-    Class workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
-    if (!workspaceClass) {
-        dlopen("/System/Library/Frameworks/CoreServices.framework/CoreServices", RTLD_NOW);
-        dlopen("/System/Library/PrivateFrameworks/MobileCoreServices.framework/MobileCoreServices", RTLD_NOW);
-        workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
-    }
+    // 1. Primary: Direct MobileContainerManager iteration (Class 2 App Data)
+    if (api->queryCreate && api->queryIterate) {
+        void *query = api->queryCreate();
+        if (query) {
+            api->querySetClass(query, 2);
+            if (api->querySetFlags) api->querySetFlags(query, 0x900000000ULL);
 
-    if (!workspaceClass) {
-        if (error) *error = @"LSApplicationWorkspace class not available on this iOS build";
-        return @[];
-    }
-
-    id workspace = ((id (*)(id, SEL))objc_msgSend)(workspaceClass, sel_registerName("defaultWorkspace"));
-    if (!workspace) {
-        if (error) *error = @"Failed to obtain default LSApplicationWorkspace instance";
-        return @[];
-    }
-
-    NSArray *apps = nil;
-    if ([workspace respondsToSelector:sel_registerName("allInstalledApplications")]) {
-        apps = ((id (*)(id, SEL))objc_msgSend)(workspace, sel_registerName("allInstalledApplications"));
-    }
-    if (!apps || apps.count == 0) {
-        if ([workspace respondsToSelector:sel_registerName("allApplications")]) {
-            apps = ((id (*)(id, SEL))objc_msgSend)(workspace, sel_registerName("allApplications"));
+            api->queryIterate(query, ^bool(void *obj) {
+                if (!obj) return true;
+                const char *rawId = api->objectGetIdentifier ? api->objectGetIdentifier(obj) : NULL;
+                const char *rawPath = api->objectGetPath ? api->objectGetPath(obj) : NULL;
+                if (rawId && rawPath) {
+                    NSString *bundleId = [NSString stringWithUTF8String:rawId];
+                    NSString *path = [NSString stringWithUTF8String:rawPath];
+                    NSString *name = bundleId.lastPathComponent;
+                    
+                    BOOL isSystem = [bundleId hasPrefix:@"com.apple."];
+                    [results addObject:@{
+                        @"name": name ?: bundleId,
+                        @"bundle_id": bundleId,
+                        @"version": @"",
+                        @"type": isSystem ? @"System" : @"User",
+                        @"container_path": path
+                    }];
+                }
+                return true;
+            });
+            api->queryFree(query);
         }
     }
 
-    if (!apps || ![apps isKindOfClass:[NSArray class]] || apps.count == 0) {
-        if (error) *error = @"allApplications query returned empty or invalid result";
-        return @[];
-    }
+    // 2. Fallback / Augment: LaunchServices if MCM returned empty
+    if (results.count == 0) {
+        Class workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
+        if (workspaceClass) {
+            id workspace = ((id (*)(id, SEL))objc_msgSend)(workspaceClass, sel_registerName("defaultWorkspace"));
+            NSArray *apps = nil;
+            if ([workspace respondsToSelector:sel_registerName("allInstalledApplications")]) {
+                apps = ((id (*)(id, SEL))objc_msgSend)(workspace, sel_registerName("allInstalledApplications"));
+            }
+            if (!apps || apps.count == 0) {
+                if ([workspace respondsToSelector:sel_registerName("allApplications")]) {
+                    apps = ((id (*)(id, SEL))objc_msgSend)(workspace, sel_registerName("allApplications"));
+                }
+            }
 
-    for (id proxy in apps) {
-        NSString *bundleId = nil;
-        if ([proxy respondsToSelector:sel_registerName("applicationIdentifier")]) {
-            bundleId = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("applicationIdentifier"));
-        } else if ([proxy respondsToSelector:sel_registerName("bundleIdentifier")]) {
-            bundleId = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("bundleIdentifier"));
-        }
+            if (apps && [apps isKindOfClass:[NSArray class]]) {
+                for (id proxy in apps) {
+                    NSString *bundleId = nil;
+                    if ([proxy respondsToSelector:sel_registerName("applicationIdentifier")]) {
+                        bundleId = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("applicationIdentifier"));
+                    } else if ([proxy respondsToSelector:sel_registerName("bundleIdentifier")]) {
+                        bundleId = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("bundleIdentifier"));
+                    }
+                    if (!bundleId || bundleId.length == 0) continue;
 
-        if (!bundleId || bundleId.length == 0) continue;
+                    NSString *name = nil;
+                    if ([proxy respondsToSelector:sel_registerName("localizedName")]) {
+                        name = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("localizedName"));
+                    }
 
-        NSString *name = nil;
-        if ([proxy respondsToSelector:sel_registerName("localizedName")]) {
-            name = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("localizedName"));
-        }
-        if (!name || name.length == 0) {
-            name = bundleId;
-        }
-
-        NSString *version = @"";
-        if ([proxy respondsToSelector:sel_registerName("shortVersionString")]) {
-            version = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("shortVersionString")) ?: @"";
-        }
-
-        NSString *appType = @"User";
-        if ([proxy respondsToSelector:sel_registerName("bundleType")]) {
-            NSString *bt = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("bundleType"));
-            if ([bt isEqualToString:@"System"] || [bt isEqualToString:@"Hidden"]) {
-                appType = bt;
+                    [results addObject:@{
+                        @"name": name ?: bundleId,
+                        @"bundle_id": bundleId,
+                        @"version": @"",
+                        @"type": [bundleId hasPrefix:@"com.apple."] ? @"System" : @"User",
+                        @"container_path": @""
+                    }];
+                }
             }
         }
-
-        [results addObject:@{
-            @"name": name,
-            @"bundle_id": bundleId,
-            @"version": version,
-            @"type": appType,
-            @"container_path": @""
-        }];
     }
 
     [results sortUsingComparator:^NSComparisonResult(NSDictionary *obj1, NSDictionary *obj2) {

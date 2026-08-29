@@ -26,8 +26,9 @@ jobs:
             -framework Foundation \
             -framework UIKit \
             -framework CoreGraphics \
+            -framework QuartzCore \
             -o MobileHouseArrestBridge \
-            main.m AppDelegate.m MCMBridge.m
+            main.m AppDelegate.m GlassStatusViewController.m MHAServer.m MCMBridge.m
           
           # Ad-hoc codesign binary with required identifier
           codesign -f -s - --identifier com.apple.mobile.MobileHouseArrest MobileHouseArrestBridge
