@@ -13,6 +13,8 @@ typedef void *(*MCMQueryGetPointer)(void *);
 typedef void (*MCMQueryFree)(void *);
 typedef const char *(*MCMObjectGetPath)(void *);
 typedef char *(*MCMObjectCopyToken)(void *);
+typedef bool (*MCMObjectActivate)(void *, bool);
+typedef void *(*MCMObjectCopy)(void *);
 typedef void (*MCMObjectFree)(void *);
 typedef int (*MCMErrorGetInt)(void *);
 typedef const char *(*MCMErrorGetString)(void *);
@@ -28,8 +30,10 @@ typedef struct {
     MCMQueryGetPointer queryGetSingle;
     MCMQueryGetPointer queryGetLastError;
     MCMQueryFree queryFree;
+    MCMObjectCopy objectCopy;
     MCMObjectGetPath objectGetPath;
     MCMObjectCopyToken objectCopyToken;
+    MCMObjectActivate objectActivate;
     MCMObjectFree objectFree;
     MCMErrorGetInt errorGetPOSIX;
     MCMErrorGetString errorGetMessage;
@@ -50,9 +54,11 @@ static MCMAPI *MCMGetAPI(void) {
         api.queryGetSingle = (MCMQueryGetPointer)dlsym(h, "container_query_get_single_result");
         api.queryGetLastError = (MCMQueryGetPointer)dlsym(h, "container_query_get_last_error");
         api.queryFree = (MCMQueryFree)dlsym(h, "container_query_free");
+        api.objectCopy = (MCMObjectCopy)dlsym(h, "container_object_copy");
         api.objectGetPath = (MCMObjectGetPath)dlsym(h, "container_object_get_path");
-        api.objectCopyToken = (MCMObjectCopyToken)dlsym(h, "container_object_copy_sandbox_token");
-        api.objectFree = (MCMObjectFree)dlsym(h, "container_free_object");
+        api.objectCopyToken = (MCMObjectCopyToken)dlsym(h, "container_copy_sandbox_token");
+        api.objectActivate = (MCMObjectActivate)dlsym(h, "container_object_sandbox_extension_activate");
+        api.objectFree = (MCMObjectFree)dlsym(h, "container_object_free");
         api.errorGetPOSIX = (MCMErrorGetInt)dlsym(h, "container_error_get_posix_errno");
         api.errorGetMessage = (MCMErrorGetString)dlsym(h, "container_error_get_path");
     });
@@ -79,19 +85,30 @@ static MCMAPI *MCMGetAPI(void) {
 
     api->querySetClass(query, containerClass);
 
-    xpc_object_t ids = xpc_array_create(NULL, 0);
-    xpc_array_set_string(ids, XPC_ARRAY_APPEND, identifier.UTF8String);
-    if (isGroup && api->querySetGroupIdentifiers) {
-        api->querySetGroupIdentifiers(query, ids);
+    xpc_object_t ids = xpc_string_create(identifier.UTF8String);
+    xpc_object_t array = xpc_array_create(&ids, 1);
+
+    if (isGroup || containerClass == 7 || containerClass == 13) {
+        if (api->querySetGroupIdentifiers) {
+            api->querySetGroupIdentifiers(query, array);
+        } else {
+            api->querySetIdentifiers(query, array);
+        }
     } else {
-        api->querySetIdentifiers(query, ids);
+        api->querySetIdentifiers(query, array);
     }
 
-    if (api->querySetFlags) {
-        api->querySetFlags(query, 0x900000000ULL);
+    if (containerClass == 13) {
+        if (api->querySetFlags) api->querySetFlags(query, 0x8100000000ULL);
+        if (api->querySetPart) api->querySetPart(query, 3); // Library/Caches
+    } else {
+        if (api->querySetFlags) api->querySetFlags(query, 0x900000000ULL);
+        if (api->querySetPart) api->querySetPart(query, 0);
     }
 
-    void *obj = api->queryGetSingle(query);
+    void *borrowed = api->queryGetSingle(query);
+    void *obj = (borrowed && api->objectCopy) ? api->objectCopy(borrowed) : borrowed;
+
     if (!obj) {
         void *errObj = api->queryGetLastError ? api->queryGetLastError(query) : NULL;
         int errCode = (errObj && api->errorGetPOSIX) ? api->errorGetPOSIX(errObj) : -1;
@@ -103,16 +120,25 @@ static MCMAPI *MCMGetAPI(void) {
     const char *rawPath = api->objectGetPath ? api->objectGetPath(obj) : NULL;
     NSString *path = rawPath ? [NSString stringWithUTF8String:rawPath] : nil;
 
+    // 1. Consume sandbox extension token
     if (api->objectCopyToken) {
         char *token = api->objectCopyToken(obj);
         if (token) {
             int64_t handle = sandbox_extension_consume(token);
-            NSLog(@"[MCMBridge] Consumed sandbox extension for %@, handle=%lld", identifier, handle);
+            NSLog(@"[MCMBridge] Consumed sandbox extension token for %@, handle=%lld", identifier, handle);
             free(token);
         }
     }
 
-    api->objectFree(obj);
+    // 2. Activate object extension
+    if (api->objectActivate) {
+        bool actRes = api->objectActivate(obj, true);
+        NSLog(@"[MCMBridge] container_object_sandbox_extension_activate returned: %d", actRes);
+    }
+
+    if (obj != borrowed && api->objectFree) {
+        api->objectFree(obj);
+    }
     api->queryFree(query);
 
     return path;
@@ -123,7 +149,6 @@ static MCMAPI *MCMGetAPI(void) {
 
     Class workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
     if (!workspaceClass) {
-        // Fallback: try loading MobileCoreServices framework
         dlopen("/System/Library/Frameworks/CoreServices.framework/CoreServices", RTLD_NOW);
         dlopen("/System/Library/PrivateFrameworks/MobileCoreServices.framework/MobileCoreServices", RTLD_NOW);
         workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
@@ -140,8 +165,17 @@ static MCMAPI *MCMGetAPI(void) {
         return @[];
     }
 
-    NSArray *apps = ((id (*)(id, SEL))objc_msgSend)(workspace, sel_registerName("allApplications"));
-    if (!apps || ![apps isKindOfClass:[NSArray class]]) {
+    NSArray *apps = nil;
+    if ([workspace respondsToSelector:sel_registerName("allInstalledApplications")]) {
+        apps = ((id (*)(id, SEL))objc_msgSend)(workspace, sel_registerName("allInstalledApplications"));
+    }
+    if (!apps || apps.count == 0) {
+        if ([workspace respondsToSelector:sel_registerName("allApplications")]) {
+            apps = ((id (*)(id, SEL))objc_msgSend)(workspace, sel_registerName("allApplications"));
+        }
+    }
+
+    if (!apps || ![apps isKindOfClass:[NSArray class]] || apps.count == 0) {
         if (error) *error = @"allApplications query returned empty or invalid result";
         return @[];
     }
@@ -177,15 +211,12 @@ static MCMAPI *MCMGetAPI(void) {
             }
         }
 
-        // Try to obtain the data container path using MCM
-        NSString *containerPath = [self resolveAndActivateContainerClass:2 identifier:bundleId isGroup:NO error:nil] ?: @"";
-
         [results addObject:@{
             @"name": name,
             @"bundle_id": bundleId,
             @"version": version,
             @"type": appType,
-            @"container_path": containerPath
+            @"container_path": @""
         }];
     }
 
