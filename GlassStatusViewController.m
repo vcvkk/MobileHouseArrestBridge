@@ -2,26 +2,28 @@
 #import <sys/utsname.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
+#import <QuartzCore/QuartzCore.h>
 
 @interface GlassStatusViewController () <UIScrollViewDelegate>
 
-// Telegram-iOS TitleView Segmented Folder Selector
-@property (nonatomic, strong) UIView *telegramTitleSegmentView;
-@property (nonatomic, strong) UIVisualEffectView *segmentGlassBlur;
-@property (nonatomic, strong) UIView *slidingPill;
-@property (nonatomic, strong) UIButton *dashboardBtn;
-@property (nonatomic, strong) UIButton *consoleBtn;
-@property (nonatomic, strong) UILabel *consoleCountBadge;
-@property (nonatomic, strong) UIView *activeIndicatorDot;
+// Telegram-iOS Native Glass TitleView Component
+@property (nonatomic, strong) UIView *telegramGlassTitleView;
+@property (nonatomic, strong) UIVisualEffectView *glassBackdropView;
+@property (nonatomic, strong) CALayer *backdropLayer;
+@property (nonatomic, strong) UIView *slidingPillView;
+@property (nonatomic, strong) UIButton *dashboardTabBtn;
+@property (nonatomic, strong) UIButton *consoleTabBtn;
+@property (nonatomic, strong) UILabel *consoleUnreadBadge;
+@property (nonatomic, strong) UIView *liveStatusDot;
 
-// Fullscreen Interactive Horizontal Paging (Telegram Folder Paging)
+// Fullscreen Page Scroll View
 @property (nonatomic, strong) UIScrollView *pagingScrollView;
 @property (nonatomic, strong) UITableView *dashboardTableView;
 @property (nonatomic, strong) UIView *consoleView;
 @property (nonatomic, strong) UITextView *consoleTextView;
 @property (nonatomic, strong) NSMutableArray<NSString *> *logHistory;
 
-// Host System Info
+// System Metadata
 @property (nonatomic, strong) NSString *deviceModel;
 @property (nonatomic, strong) NSString *osVersion;
 @property (nonatomic, assign) NSUInteger activeClientsCount;
@@ -38,7 +40,7 @@
     self.logHistory = [NSMutableArray array];
     
     [self loadSystemInfo];
-    [self setupTelegramNavigationTitleView];
+    [self setupTelegramNavigationBar];
     [self setupFullscreenPaging];
     
     [MHAServer sharedServer].delegate = self;
@@ -62,9 +64,9 @@
     self.activeClientsCount = 0;
 }
 
-#pragma mark - Telegram-iOS Native Navigation TitleView Folder Tabs
+#pragma mark - Telegram-iOS Glass Navigation Header
 
-- (void)setupTelegramNavigationTitleView {
+- (void)setupTelegramNavigationBar {
     if (!self.navigationController) return;
     
     self.navigationController.navigationBar.prefersLargeTitles = NO;
@@ -78,73 +80,73 @@
     self.navigationController.navigationBar.scrollEdgeAppearance = appearance;
     self.navigationController.navigationBar.compactAppearance = appearance;
     
-    // Right Action: Share Logs
+    // Right Action: Export Logs
     UIBarButtonItem *shareItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(shareLogs)];
     self.navigationItem.rightBarButtonItem = shareItem;
     
-    // Exact Telegram-iOS Navigation Segment Frame (Width: 230, Height: 32)
-    self.telegramTitleSegmentView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 230, 32)];
+    // Telegram-iOS Folder Bar Frame: 236 x 32
+    self.telegramGlassTitleView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 236, 32)];
     
-    // Background Glass Capsule
+    // 1. Hardware-accelerated Glass Backdrop (Telegram GlassBackgroundComponent)
     UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterialDark];
-    self.segmentGlassBlur = [[UIVisualEffectView alloc] initWithEffect:blur];
-    self.segmentGlassBlur.frame = self.telegramTitleSegmentView.bounds;
-    self.segmentGlassBlur.layer.cornerRadius = 16;
-    self.segmentGlassBlur.layer.cornerCurve = kCACornerCurveContinuous;
-    self.segmentGlassBlur.layer.masksToBounds = YES;
-    self.segmentGlassBlur.backgroundColor = [UIColor colorWithWhite:0.18 alpha:0.45];
-    [self.telegramTitleSegmentView addSubview:self.segmentGlassBlur];
+    self.glassBackdropView = [[UIVisualEffectView alloc] initWithEffect:blur];
+    self.glassBackdropView.frame = self.telegramGlassTitleView.bounds;
+    self.glassBackdropView.layer.cornerRadius = 16;
+    self.glassBackdropView.layer.cornerCurve = kCACornerCurveContinuous;
+    self.glassBackdropView.layer.masksToBounds = YES;
+    self.glassBackdropView.backgroundColor = [UIColor colorWithWhite:0.18 alpha:0.40];
+    [self.telegramGlassTitleView addSubview:self.glassBackdropView];
     
-    // Sliding Pill Highlight
-    self.slidingPill = [[UIView alloc] initWithFrame:CGRectMake(2, 2, 111, 28)];
-    self.slidingPill.backgroundColor = [UIColor colorWithWhite:0.32 alpha:0.85];
-    self.slidingPill.layer.cornerRadius = 14;
-    self.slidingPill.layer.cornerCurve = kCACornerCurveContinuous;
-    self.slidingPill.layer.shadowColor = [UIColor blackColor].CGColor;
-    self.slidingPill.layer.shadowRadius = 3;
-    self.slidingPill.layer.shadowOpacity = 0.25;
-    self.slidingPill.layer.shadowOffset = CGSizeMake(0, 1);
-    [self.segmentGlassBlur.contentView addSubview:self.slidingPill];
+    // 2. Sliding Glass Pill Indicator (Telegram Folder Indicator)
+    self.slidingPillView = [[UIView alloc] initWithFrame:CGRectMake(2, 2, 114, 28)];
+    self.slidingPillView.backgroundColor = [UIColor colorWithWhite:0.32 alpha:0.85];
+    self.slidingPillView.layer.cornerRadius = 14;
+    self.slidingPillView.layer.cornerCurve = kCACornerCurveContinuous;
+    self.slidingPillView.layer.shadowColor = [UIColor blackColor].CGColor;
+    self.slidingPillView.layer.shadowRadius = 4;
+    self.slidingPillView.layer.shadowOpacity = 0.25;
+    self.slidingPillView.layer.shadowOffset = CGSizeMake(0, 1);
+    [self.glassBackdropView.contentView addSubview:self.slidingPillView];
     
-    // Tab 1: Dashboard
-    self.dashboardBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    self.dashboardBtn.frame = CGRectMake(0, 0, 115, 32);
-    [self.dashboardBtn setTitle:@"Dashboard" forState:UIControlStateNormal];
-    [self.dashboardBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    self.dashboardBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-    [self.dashboardBtn addTarget:self action:@selector(dashboardTabClicked) forControlEvents:UIControlEventTouchUpInside];
-    [self.segmentGlassBlur.contentView addSubview:self.dashboardBtn];
+    // 3. Tab 1: Dashboard
+    self.dashboardTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    self.dashboardTabBtn.frame = CGRectMake(0, 0, 118, 32);
+    [self.dashboardTabBtn setTitle:@"Dashboard" forState:UIControlStateNormal];
+    [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    [self.dashboardTabBtn addTarget:self action:@selector(selectDashboard) forControlEvents:UIControlEventTouchUpInside];
+    [self.glassBackdropView.contentView addSubview:self.dashboardTabBtn];
     
-    // Active Pulse Dot inside Dashboard Tab
-    self.activeIndicatorDot = [[UIView alloc] initWithFrame:CGRectMake(12, 13, 6, 6)];
-    self.activeIndicatorDot.backgroundColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:1.0];
-    self.activeIndicatorDot.layer.cornerRadius = 3;
-    [self.dashboardBtn addSubview:self.activeIndicatorDot];
+    // Status Dot inside Dashboard
+    self.liveStatusDot = [[UIView alloc] initWithFrame:CGRectMake(12, 13, 6, 6)];
+    self.liveStatusDot.backgroundColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:1.0];
+    self.liveStatusDot.layer.cornerRadius = 3;
+    [self.dashboardTabBtn addSubview:self.liveStatusDot];
     
-    // Tab 2: Console
-    self.consoleBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    self.consoleBtn.frame = CGRectMake(115, 0, 115, 32);
-    [self.consoleBtn setTitle:@"Console" forState:UIControlStateNormal];
-    [self.consoleBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
-    self.consoleBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    [self.consoleBtn addTarget:self action:@selector(consoleTabClicked) forControlEvents:UIControlEventTouchUpInside];
-    [self.segmentGlassBlur.contentView addSubview:self.consoleBtn];
+    // 4. Tab 2: Console
+    self.consoleTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    self.consoleTabBtn.frame = CGRectMake(118, 0, 118, 32);
+    [self.consoleTabBtn setTitle:@"Console" forState:UIControlStateNormal];
+    [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
+    self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    [self.consoleTabBtn addTarget:self action:@selector(selectConsole) forControlEvents:UIControlEventTouchUpInside];
+    [self.glassBackdropView.contentView addSubview:self.consoleTabBtn];
     
     // Telegram-style Folder Badge Count
-    self.consoleCountBadge = [[UILabel alloc] initWithFrame:CGRectMake(86, 8, 18, 16)];
-    self.consoleCountBadge.text = @"0";
-    self.consoleCountBadge.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightBold];
-    self.consoleCountBadge.textColor = [UIColor whiteColor];
-    self.consoleCountBadge.textAlignment = NSTextAlignmentCenter;
-    self.consoleCountBadge.backgroundColor = [UIColor colorWithRed:0.22 green:0.53 blue:0.95 alpha:0.90];
-    self.consoleCountBadge.layer.cornerRadius = 8;
-    self.consoleCountBadge.layer.masksToBounds = YES;
-    [self.consoleBtn addSubview:self.consoleCountBadge];
+    self.consoleUnreadBadge = [[UILabel alloc] initWithFrame:CGRectMake(88, 8, 18, 16)];
+    self.consoleUnreadBadge.text = @"0";
+    self.consoleUnreadBadge.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightBold];
+    self.consoleUnreadBadge.textColor = [UIColor whiteColor];
+    self.consoleUnreadBadge.textAlignment = NSTextAlignmentCenter;
+    self.consoleUnreadBadge.backgroundColor = [UIColor colorWithRed:0.22 green:0.53 blue:0.95 alpha:0.90];
+    self.consoleUnreadBadge.layer.cornerRadius = 8;
+    self.consoleUnreadBadge.layer.masksToBounds = YES;
+    [self.consoleTabBtn addSubview:self.consoleUnreadBadge];
     
-    self.navigationItem.titleView = self.telegramTitleSegmentView;
+    self.navigationItem.titleView = self.telegramGlassTitleView;
 }
 
-#pragma mark - Telegram-iOS Fullscreen Horizontal Pager
+#pragma mark - Telegram Fullscreen Pager
 
 - (void)setupFullscreenPaging {
     UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
@@ -166,7 +168,7 @@
         [self.pagingScrollView.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor]
     ]];
     
-    // Page 1: Dashboard TableView (Inset Grouped)
+    // Page 1: Dashboard TableView
     self.dashboardTableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.dashboardTableView.translatesAutoresizingMaskIntoConstraints = NO;
     self.dashboardTableView.backgroundColor = [UIColor blackColor];
@@ -249,7 +251,7 @@
     ]];
 }
 
-#pragma mark - Telegram-iOS Scroll Synchronizer
+#pragma mark - Telegram-iOS Scroll Synchronization
 
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
     if (scrollView == self.pagingScrollView) {
@@ -259,31 +261,31 @@
         CGFloat progress = self.pagingScrollView.contentOffset.x / pageWidth;
         progress = fmax(0.0, fmin(1.0, progress));
         
-        CGFloat pillWidth = 111.0;
-        CGFloat pillX = 2.0 + (progress * 115.0);
-        self.slidingPill.frame = CGRectMake(pillX, 2.0, pillWidth, 28.0);
+        CGFloat pillWidth = 114.0;
+        CGFloat pillX = 2.0 + (progress * 118.0);
+        self.slidingPillView.frame = CGRectMake(pillX, 2.0, pillWidth, 28.0);
         
         if (progress < 0.5) {
-            [self.dashboardBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-            self.dashboardBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-            [self.consoleBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
-            self.consoleBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+            [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+            [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
+            self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         } else {
-            [self.dashboardBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
-            self.dashboardBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-            [self.consoleBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-            self.consoleBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+            [self.dashboardTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
+            self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+            [self.consoleTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
         }
     }
 }
 
-- (void)dashboardTabClicked {
+- (void)selectDashboard {
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
     [haptic impactOccurred];
     [self.pagingScrollView setContentOffset:CGPointMake(0, 0) animated:YES];
 }
 
-- (void)consoleTabClicked {
+- (void)selectConsole {
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
     [haptic impactOccurred];
     CGFloat pageWidth = self.pagingScrollView.bounds.size.width;
@@ -311,9 +313,9 @@
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"MHANativeCell"];
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"MHATelegramGlassCell"];
     if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"MHANativeCell"];
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"MHATelegramGlassCell"];
         cell.backgroundColor = [UIColor colorWithRed:0.07 green:0.07 blue:0.09 alpha:1.0];
         cell.layer.cornerRadius = 12;
         cell.layer.cornerCurve = kCACornerCurveContinuous;
@@ -386,7 +388,7 @@
     }
     
     dispatch_async(dispatch_get_main_queue(), ^{
-        self.consoleCountBadge.text = [NSString stringWithFormat:@"%lu", (unsigned long)self.logHistory.count];
+        self.consoleUnreadBadge.text = [NSString stringWithFormat:@"%lu", (unsigned long)self.logHistory.count];
         self.consoleTextView.text = [self.logHistory componentsJoinedByString:@"\n"];
         if (self.consoleTextView.text.length > 0) {
             NSRange bottom = NSMakeRange(self.consoleTextView.text.length - 1, 1);
@@ -404,7 +406,7 @@
 
 - (void)clearLogs {
     [self.logHistory removeAllObjects];
-    self.consoleCountBadge.text = @"0";
+    self.consoleUnreadBadge.text = @"0";
     self.consoleTextView.text = @"";
 }
 
