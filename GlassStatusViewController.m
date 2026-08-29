@@ -4,12 +4,8 @@
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 
-// Forward-declare Apple's iOS 26+ UIGlassEffect class (inherits UIVisualEffect)
-// This class is available in the Xcode 26 SDK headers.
-// At runtime on iOS 26+, UIGlassEffect is fully functional.
-@interface UIGlassEffect : UIVisualEffect
-+ (instancetype)effect;
-@end
+// UIGlassEffect is provided by UIKit/UIGlassEffect.h in Xcode 26 SDK (iOS 26+)
+// It inherits from UIVisualEffect and renders native Liquid Glass material.
 
 @interface GlassStatusViewController () <UIScrollViewDelegate>
 
