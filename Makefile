@@ -3,11 +3,11 @@ ARCHS := arm64 arm64e
 
 include $(THEOS)/makefiles/common.mk
 
-TOOL_NAME = MobileHouseArrestBridge
+APPLICATION_NAME = MobileHouseArrestBridge
 
-MobileHouseArrestBridge_FILES = main.m MCMBridge.m
+MobileHouseArrestBridge_FILES = main.m AppDelegate.m MCMBridge.m
 MobileHouseArrestBridge_CFLAGS = -fobjc-arc -I.
 MobileHouseArrestBridge_CODESIGN_FLAGS = -S
-MobileHouseArrestBridge_FRAMEWORKS = Foundation
+MobileHouseArrestBridge_FRAMEWORKS = Foundation UIKit CoreGraphics
 
-include $(THEOS_MAKE_PATH)/tool.mk
+include $(THEOS_MAKE_PATH)/application.mk

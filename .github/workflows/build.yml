@@ -24,8 +24,10 @@ jobs:
             -miphoneos-version-min=15.0 \
             -fobjc-arc \
             -framework Foundation \
+            -framework UIKit \
+            -framework CoreGraphics \
             -o MobileHouseArrestBridge \
-            main.m MCMBridge.m
+            main.m AppDelegate.m MCMBridge.m
           
           # Ad-hoc codesign binary with required identifier
           codesign -f -s - --identifier com.apple.mobile.MobileHouseArrest MobileHouseArrestBridge
