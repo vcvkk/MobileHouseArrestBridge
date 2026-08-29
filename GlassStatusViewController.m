@@ -1,26 +1,27 @@
 #import "GlassStatusViewController.h"
 #import <sys/utsname.h>
-#import <QuartzCore/QuartzCore.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 
-@interface GlassStatusViewController ()
+@interface GlassStatusViewController () <UIScrollViewDelegate>
 
-// Apple HIG Liquid Glass Floating Navigation Component
-@property (nonatomic, strong) UIVisualEffectView *liquidGlassContainer;
-@property (nonatomic, strong) CAGradientLayer *specularRimBorder;
-@property (nonatomic, strong) UIVisualEffectView *glassPillEffectView;
+// Telegram-iOS Style Folder Tab Bar
+@property (nonatomic, strong) UIView *tabBarContainer;
+@property (nonatomic, strong) UIVisualEffectView *tabBarBlurView;
+@property (nonatomic, strong) UIView *slidingPillIndicator;
 @property (nonatomic, strong) UIButton *dashboardTabBtn;
 @property (nonatomic, strong) UIButton *consoleTabBtn;
-@property (nonatomic, assign) NSInteger selectedTab;
+@property (nonatomic, strong) UILabel *consoleBadgeLabel;
+@property (nonatomic, strong) UIView *statusDot;
 
-// OLED Content Views
-@property (nonatomic, strong) UITableView *tableView;
-@property (nonatomic, strong) UIView *consoleContainer;
+// Interactive Horizontal Paging (Telegram Folder Paging)
+@property (nonatomic, strong) UIScrollView *pagingScrollView;
+@property (nonatomic, strong) UITableView *dashboardTableView;
+@property (nonatomic, strong) UIView *consoleView;
 @property (nonatomic, strong) UITextView *consoleTextView;
 @property (nonatomic, strong) NSMutableArray<NSString *> *logHistory;
 
-// Host System Metadata
+// Host Metadata
 @property (nonatomic, strong) NSString *deviceModel;
 @property (nonatomic, strong) NSString *osVersion;
 @property (nonatomic, assign) NSUInteger activeClientsCount;
@@ -32,17 +33,13 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"HouseArrest";
-    
-    // OLED True Black Canvas
     self.view.backgroundColor = [UIColor blackColor];
     self.logHistory = [NSMutableArray array];
-    self.selectedTab = 0;
     
     [self loadSystemInfo];
     [self setupNavigationBar];
-    [self setupNativeLiquidGlassNavigation];
-    [self setupTableView];
-    [self setupConsoleView];
+    [self setupTelegramFolderTabBar];
+    [self setupPagingScrollView];
     
     [MHAServer sharedServer].delegate = self;
     
@@ -50,7 +47,7 @@
     if (![[MHAServer sharedServer] startOnPort:8080 error:&error]) {
         [self serverDidLogMessage:[NSString stringWithFormat:@"Failed to bind port 8080: %@", error.localizedDescription] isError:YES];
     } else {
-        [self serverDidLogMessage:@"HouseArrest daemon active on 0.0.0.0:8080" isError:NO];
+        [self serverDidLogMessage:@"HouseArrest daemon listening on 0.0.0.0:8080" isError:NO];
         [self serverDidLogMessage:@"USBMux bridge ready for incoming TCP connections." isError:NO];
     }
 }
@@ -67,7 +64,7 @@
 
 - (void)setupNavigationBar {
     if (self.navigationController) {
-        self.navigationController.navigationBar.prefersLargeTitles = YES;
+        self.navigationController.navigationBar.prefersLargeTitles = NO; // Telegram style clean compact top bar
         self.navigationController.navigationBar.tintColor = [UIColor colorWithRed:0.20 green:0.85 blue:0.55 alpha:1.0];
         
         UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
@@ -77,10 +74,6 @@
         appearance.titleTextAttributes = @{
             NSForegroundColorAttributeName: [UIColor whiteColor],
             NSFontAttributeName: [UIFont systemFontOfSize:17 weight:UIFontWeightBold]
-        };
-        appearance.largeTitleTextAttributes = @{
-            NSForegroundColorAttributeName: [UIColor whiteColor],
-            NSFontAttributeName: [UIFont systemFontOfSize:34 weight:UIFontWeightHeavy]
         };
         
         self.navigationController.navigationBar.standardAppearance = appearance;
@@ -92,223 +85,152 @@
     }
 }
 
-#pragma mark - Native Apple HIG Liquid Glass Navigation (iOS 26 Architecture)
+#pragma mark - Telegram-iOS Style Folder Tabs
 
-- (void)setupNativeLiquidGlassNavigation {
-    // 1. Dynamic Glass Effect Lookup (UIGlassEffect on iOS 26+ with fallback to UltraThinMaterial)
-    UIVisualEffect *glassEffect = nil;
-    Class glassClass = NSClassFromString(@"UIGlassEffect");
-    if (glassClass && [glassClass respondsToSelector:sel_registerName("effectWithStyle:")]) {
-        glassEffect = ((id (*)(id, SEL, NSInteger))objc_msgSend)(glassClass, sel_registerName("effectWithStyle:"), 0);
-    }
-    if (!glassEffect) {
-        glassEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
-    }
+- (void)setupTelegramFolderTabBar {
+    self.tabBarContainer = [[UIView alloc] init];
+    self.tabBarContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.tabBarContainer];
     
-    // 2. Outer Liquid Glass Capsule Container (concentric continuous capsule)
-    self.liquidGlassContainer = [[UIVisualEffectView alloc] initWithEffect:glassEffect];
-    self.liquidGlassContainer.translatesAutoresizingMaskIntoConstraints = NO;
-    self.liquidGlassContainer.layer.cornerRadius = 24;
-    self.liquidGlassContainer.layer.cornerCurve = kCACornerCurveContinuous;
-    self.liquidGlassContainer.layer.masksToBounds = YES;
-    self.liquidGlassContainer.backgroundColor = [UIColor colorWithWhite:0.10 alpha:0.40];
-    [self.view addSubview:self.liquidGlassContainer];
+    // Frosted Capsule Blur
+    UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterialDark];
+    self.tabBarBlurView = [[UIVisualEffectView alloc] initWithEffect:blur];
+    self.tabBarBlurView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.tabBarBlurView.layer.cornerRadius = 19;
+    self.tabBarBlurView.layer.cornerCurve = kCACornerCurveContinuous;
+    self.tabBarBlurView.layer.masksToBounds = YES;
+    self.tabBarBlurView.backgroundColor = [UIColor colorWithWhite:0.14 alpha:0.45];
+    [self.tabBarContainer addSubview:self.tabBarBlurView];
     
-    // 3. Specular Incident Light Rim (Apple HIG 45° refraction highlight)
-    self.specularRimBorder = [CAGradientLayer layer];
-    self.specularRimBorder.cornerRadius = 24;
-    self.specularRimBorder.cornerCurve = kCACornerCurveContinuous;
-    self.specularRimBorder.colors = @[
-        (id)[UIColor colorWithWhite:1.0 alpha:0.40].CGColor, // Top-left specular highlight
-        (id)[UIColor colorWithWhite:1.0 alpha:0.12].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.04].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.20].CGColor  // Bottom-right caustic reflection
-    ];
-    self.specularRimBorder.startPoint = CGPointMake(0.0, 0.0);
-    self.specularRimBorder.endPoint = CGPointMake(1.0, 1.0);
+    // Telegram-style Smooth Sliding Pill Indicator
+    self.slidingPillIndicator = [[UIView alloc] init];
+    self.slidingPillIndicator.backgroundColor = [UIColor colorWithWhite:0.26 alpha:0.80];
+    self.slidingPillIndicator.layer.cornerRadius = 15;
+    self.slidingPillIndicator.layer.cornerCurve = kCACornerCurveContinuous;
+    self.slidingPillIndicator.layer.shadowColor = [UIColor blackColor].CGColor;
+    self.slidingPillIndicator.layer.shadowRadius = 4;
+    self.slidingPillIndicator.layer.shadowOpacity = 0.3;
+    self.slidingPillIndicator.layer.shadowOffset = CGSizeMake(0, 2);
+    [self.tabBarBlurView.contentView addSubview:self.slidingPillIndicator];
     
-    CAShapeLayer *rimMask = [CAShapeLayer layer];
-    rimMask.lineWidth = 1.2;
-    rimMask.fillColor = [UIColor clearColor].CGColor;
-    rimMask.strokeColor = [UIColor whiteColor].CGColor;
-    self.specularRimBorder.mask = rimMask;
-    [self.liquidGlassContainer.layer addSublayer:self.specularRimBorder];
-    
-    // 4. Morphing Glass Selection Pill (Concentric Geometry: r_inner = r_outer - padding = 24 - 4 = 20)
-    UIBlurEffect *pillBlur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterialDark];
-    self.glassPillEffectView = [[UIVisualEffectView alloc] initWithEffect:pillBlur];
-    self.glassPillEffectView.layer.cornerRadius = 20;
-    self.glassPillEffectView.layer.cornerCurve = kCACornerCurveContinuous;
-    self.glassPillEffectView.layer.masksToBounds = YES;
-    self.glassPillEffectView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.18];
-    self.glassPillEffectView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.28].CGColor;
-    self.glassPillEffectView.layer.borderWidth = 1.0;
-    [self.liquidGlassContainer.contentView addSubview:self.glassPillEffectView];
-    
-    // 5. Interactive Touch Targets (HIG Touch Area >= 44pt)
+    // Tab 1: Dashboard
     self.dashboardTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     self.dashboardTabBtn.translatesAutoresizingMaskIntoConstraints = NO;
     [self.dashboardTabBtn setTitle:@"Dashboard" forState:UIControlStateNormal];
     [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    [self.dashboardTabBtn addTarget:self action:@selector(dashboardTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.dashboardTabBtn addTarget:self action:@selector(touchDown:) forControlEvents:UIControlEventTouchDown];
-    [self.dashboardTabBtn addTarget:self action:@selector(touchUp:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
-    [self.liquidGlassContainer.contentView addSubview:self.dashboardTabBtn];
+    [self.dashboardTabBtn addTarget:self action:@selector(selectDashboardTab) forControlEvents:UIControlEventTouchUpInside];
+    [self.tabBarBlurView.contentView addSubview:self.dashboardTabBtn];
     
+    // Status Dot inside Dashboard Tab
+    self.statusDot = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 6, 6)];
+    self.statusDot.backgroundColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:1.0];
+    self.statusDot.layer.cornerRadius = 3;
+    self.statusDot.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.dashboardTabBtn addSubview:self.statusDot];
+    
+    // Tab 2: Console Logs
     self.consoleTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     self.consoleTabBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.consoleTabBtn setTitle:@"Console Logs" forState:UIControlStateNormal];
-    [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
+    [self.consoleTabBtn setTitle:@"Console" forState:UIControlStateNormal];
+    [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
     self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
-    [self.consoleTabBtn addTarget:self action:@selector(consoleTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.consoleTabBtn addTarget:self action:@selector(touchDown:) forControlEvents:UIControlEventTouchDown];
-    [self.consoleTabBtn addTarget:self action:@selector(touchUp:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
-    [self.liquidGlassContainer.contentView addSubview:self.consoleTabBtn];
+    [self.consoleTabBtn addTarget:self action:@selector(selectConsoleTab) forControlEvents:UIControlEventTouchUpInside];
+    [self.tabBarBlurView.contentView addSubview:self.consoleTabBtn];
+    
+    // Telegram-style Unread / Event Badge
+    self.consoleBadgeLabel = [[UILabel alloc] init];
+    self.consoleBadgeLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    self.consoleBadgeLabel.text = @"0";
+    self.consoleBadgeLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightBold];
+    self.consoleBadgeLabel.textColor = [UIColor whiteColor];
+    self.consoleBadgeLabel.textAlignment = NSTextAlignmentCenter;
+    self.consoleBadgeLabel.backgroundColor = [UIColor colorWithRed:0.20 green:0.40 blue:0.80 alpha:0.85];
+    self.consoleBadgeLabel.layer.cornerRadius = 8;
+    self.consoleBadgeLabel.layer.masksToBounds = YES;
+    [self.consoleTabBtn addSubview:self.consoleBadgeLabel];
     
     UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [self.liquidGlassContainer.topAnchor constraintEqualToAnchor:guide.topAnchor constant:4],
-        [self.liquidGlassContainer.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
-        [self.liquidGlassContainer.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-        [self.liquidGlassContainer.heightAnchor constraintEqualToConstant:48],
+        [self.tabBarContainer.topAnchor constraintEqualToAnchor:guide.topAnchor constant:6],
+        [self.tabBarContainer.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [self.tabBarContainer.widthAnchor constraintEqualToConstant:280],
+        [self.tabBarContainer.heightAnchor constraintEqualToConstant:38],
         
-        [self.dashboardTabBtn.leadingAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.leadingAnchor],
-        [self.dashboardTabBtn.topAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.topAnchor],
-        [self.dashboardTabBtn.bottomAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.bottomAnchor],
-        [self.dashboardTabBtn.widthAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.widthAnchor multiplier:0.5],
+        [self.tabBarBlurView.leadingAnchor constraintEqualToAnchor:self.tabBarContainer.leadingAnchor],
+        [self.tabBarBlurView.trailingAnchor constraintEqualToAnchor:self.tabBarContainer.trailingAnchor],
+        [self.tabBarBlurView.topAnchor constraintEqualToAnchor:self.tabBarContainer.topAnchor],
+        [self.tabBarBlurView.bottomAnchor constraintEqualToAnchor:self.tabBarContainer.bottomAnchor],
         
-        [self.consoleTabBtn.trailingAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.trailingAnchor],
-        [self.consoleTabBtn.topAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.topAnchor],
-        [self.consoleTabBtn.bottomAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.bottomAnchor],
-        [self.consoleTabBtn.widthAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.widthAnchor multiplier:0.5]
+        [self.dashboardTabBtn.leadingAnchor constraintEqualToAnchor:self.tabBarBlurView.contentView.leadingAnchor],
+        [self.dashboardTabBtn.topAnchor constraintEqualToAnchor:self.tabBarBlurView.contentView.topAnchor],
+        [self.dashboardTabBtn.bottomAnchor constraintEqualToAnchor:self.tabBarBlurView.contentView.bottomAnchor],
+        [self.dashboardTabBtn.widthAnchor constraintEqualToAnchor:self.tabBarBlurView.contentView.widthAnchor multiplier:0.5],
+        
+        [self.statusDot.centerYAnchor constraintEqualToAnchor:self.dashboardTabBtn.centerYAnchor],
+        [self.statusDot.trailingAnchor constraintEqualToAnchor:self.dashboardTabBtn.titleLabel.leadingAnchor constant:-6],
+        [self.statusDot.widthAnchor constraintEqualToConstant:6],
+        [self.statusDot.heightAnchor constraintEqualToConstant:6],
+        
+        [self.consoleTabBtn.trailingAnchor constraintEqualToAnchor:self.tabBarBlurView.contentView.trailingAnchor],
+        [self.consoleTabBtn.topAnchor constraintEqualToAnchor:self.tabBarBlurView.contentView.topAnchor],
+        [self.consoleTabBtn.bottomAnchor constraintEqualToAnchor:self.tabBarBlurView.contentView.bottomAnchor],
+        [self.consoleTabBtn.widthAnchor constraintEqualToAnchor:self.tabBarBlurView.contentView.widthAnchor multiplier:0.5],
+        
+        [self.consoleBadgeLabel.centerYAnchor constraintEqualToAnchor:self.consoleTabBtn.centerYAnchor],
+        [self.consoleBadgeLabel.leadingAnchor constraintEqualToAnchor:self.consoleTabBtn.titleLabel.trailingAnchor constant:6],
+        [self.consoleBadgeLabel.heightAnchor constraintEqualToConstant:16],
+        [self.consoleBadgeLabel.widthAnchor constraintGreaterThanOrEqualToConstant:18]
     ]];
 }
 
-- (void)viewDidLayoutSubviews {
-    [super viewDidLayoutSubviews];
-    
-    // Update specular rim border geometry
-    self.specularRimBorder.frame = self.liquidGlassContainer.bounds;
-    CAShapeLayer *mask = (CAShapeLayer *)self.specularRimBorder.mask;
-    if (mask) {
-        UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:CGRectInset(self.liquidGlassContainer.bounds, 0.6, 0.6)
-                                                        cornerRadius:24];
-        mask.path = path.CGPath;
-    }
-    
-    [self updatePillFrameAnimated:NO];
-}
+#pragma mark - Telegram-iOS Interactive Horizontal Paging
 
-- (void)updatePillFrameAnimated:(BOOL)animated {
-    CGFloat totalW = self.liquidGlassContainer.bounds.size.width;
-    CGFloat h = self.liquidGlassContainer.bounds.size.height;
-    if (totalW <= 0 || h <= 0) return;
-    
-    CGFloat padding = 4.0;
-    CGFloat pillW = (totalW / 2.0) - (padding * 2);
-    CGFloat pillH = h - (padding * 2);
-    CGFloat pillX = (self.selectedTab == 0) ? padding : (totalW / 2.0) + padding;
-    CGRect targetRect = CGRectMake(pillX, padding, pillW, pillH);
-    
-    void (^animations)(void) = ^{
-        self.glassPillEffectView.frame = targetRect;
-        if (self.selectedTab == 0) {
-            [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-            self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-            [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
-            self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
-        } else {
-            [self.dashboardTabBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
-            self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
-            [self.consoleTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-            self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-        }
-    };
-    
-    if (animated) {
-        UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
-        [haptic impactOccurred];
-        [UIView animateWithDuration:0.38
-                              delay:0
-             usingSpringWithDamping:0.75
-              initialSpringVelocity:0.6
-                            options:UIViewAnimationOptionCurveEaseInOut
-                         animations:animations
-                         completion:nil];
-    } else {
-        animations();
-    }
-}
-
-- (void)touchDown:(UIButton *)btn {
-    [UIView animateWithDuration:0.15 animations:^{
-        self.liquidGlassContainer.transform = CGAffineTransformMakeScale(0.985, 0.985);
-    }];
-}
-
-- (void)touchUp:(UIButton *)btn {
-    [UIView animateWithDuration:0.25 delay:0 usingSpringWithDamping:0.6 initialSpringVelocity:0.5 options:0 animations:^{
-        self.liquidGlassContainer.transform = CGAffineTransformIdentity;
-    } completion:nil];
-}
-
-- (void)dashboardTapped {
-    if (self.selectedTab == 0) return;
-    self.selectedTab = 0;
-    [self updatePillFrameAnimated:YES];
-    self.tableView.hidden = NO;
-    self.consoleContainer.hidden = YES;
-}
-
-- (void)consoleTapped {
-    if (self.selectedTab == 1) return;
-    self.selectedTab = 1;
-    [self updatePillFrameAnimated:YES];
-    self.tableView.hidden = YES;
-    self.consoleContainer.hidden = NO;
-    [self refreshConsoleDisplay];
-}
-
-#pragma mark - True Black OLED TableView
-
-- (void)setupTableView {
-    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
-    self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.tableView.backgroundColor = [UIColor blackColor];
-    self.tableView.dataSource = self;
-    self.tableView.delegate = self;
-    self.tableView.separatorColor = [UIColor colorWithWhite:1.0 alpha:0.06];
-    [self.view addSubview:self.tableView];
-    
+- (void)setupPagingScrollView {
     UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
+    
+    self.pagingScrollView = [[UIScrollView alloc] init];
+    self.pagingScrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.pagingScrollView.pagingEnabled = YES;
+    self.pagingScrollView.showsHorizontalScrollIndicator = NO;
+    self.pagingScrollView.showsVerticalScrollIndicator = NO;
+    self.pagingScrollView.bounces = YES;
+    self.pagingScrollView.delegate = self;
+    self.pagingScrollView.backgroundColor = [UIColor blackColor];
+    [self.view addSubview:self.pagingScrollView];
+    
     [NSLayoutConstraint activateConstraints:@[
-        [self.tableView.topAnchor constraintEqualToAnchor:self.liquidGlassContainer.bottomAnchor constant:8],
-        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.tableView.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor]
+        [self.pagingScrollView.topAnchor constraintEqualToAnchor:self.tabBarContainer.bottomAnchor constant:8],
+        [self.pagingScrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.pagingScrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.pagingScrollView.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor]
     ]];
-}
-
-#pragma mark - True Black OLED Console View
-
-- (void)setupConsoleView {
-    self.consoleContainer = [[UIView alloc] init];
-    self.consoleContainer.translatesAutoresizingMaskIntoConstraints = NO;
-    self.consoleContainer.hidden = YES;
-    self.consoleContainer.backgroundColor = [UIColor colorWithRed:0.04 green:0.04 blue:0.05 alpha:1.0];
-    self.consoleContainer.layer.cornerRadius = 20;
-    self.consoleContainer.layer.cornerCurve = kCACornerCurveContinuous;
-    self.consoleContainer.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.12].CGColor;
-    self.consoleContainer.layer.borderWidth = 1.0;
-    self.consoleContainer.layer.masksToBounds = YES;
-    [self.view addSubview:self.consoleContainer];
+    
+    // Page 1: Dashboard TableView
+    self.dashboardTableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
+    self.dashboardTableView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.dashboardTableView.backgroundColor = [UIColor blackColor];
+    self.dashboardTableView.dataSource = self;
+    self.dashboardTableView.delegate = self;
+    self.dashboardTableView.separatorColor = [UIColor colorWithWhite:1.0 alpha:0.06];
+    [self.pagingScrollView addSubview:self.dashboardTableView];
+    
+    // Page 2: Console Log View
+    self.consoleView = [[UIView alloc] init];
+    self.consoleView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.consoleView.backgroundColor = [UIColor colorWithRed:0.04 green:0.04 blue:0.05 alpha:1.0];
+    self.consoleView.layer.cornerRadius = 16;
+    self.consoleView.layer.cornerCurve = kCACornerCurveContinuous;
+    self.consoleView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.10].CGColor;
+    self.consoleView.layer.borderWidth = 1.0;
+    self.consoleView.layer.masksToBounds = YES;
+    [self.pagingScrollView addSubview:self.consoleView];
     
     // Top Bar inside console with Clear Button
     UIView *topBar = [[UIView alloc] init];
     topBar.translatesAutoresizingMaskIntoConstraints = NO;
     topBar.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.10 alpha:1.0];
-    [self.consoleContainer addSubview:topBar];
+    [self.consoleView addSubview:topBar];
     
     UILabel *lbl = [[UILabel alloc] init];
     lbl.translatesAutoresizingMaskIntoConstraints = NO;
@@ -331,32 +253,99 @@
     self.consoleTextView.textColor = [UIColor colorWithRed:0.35 green:0.90 blue:0.65 alpha:1.0];
     self.consoleTextView.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
     self.consoleTextView.editable = NO;
-    self.consoleTextView.textContainerInset = UIEdgeInsetsMake(14, 14, 14, 14);
-    [self.consoleContainer addSubview:self.consoleTextView];
+    self.consoleTextView.textContainerInset = UIEdgeInsetsMake(12, 12, 12, 12);
+    [self.consoleView addSubview:self.consoleTextView];
     
-    UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
+    // Autolayout for 2 horizontal pages
     [NSLayoutConstraint activateConstraints:@[
-        [self.consoleContainer.topAnchor constraintEqualToAnchor:self.liquidGlassContainer.bottomAnchor constant:12],
-        [self.consoleContainer.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
-        [self.consoleContainer.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-        [self.consoleContainer.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor constant:-12],
+        // ScrollView Content Layout
+        [self.dashboardTableView.topAnchor constraintEqualToAnchor:self.pagingScrollView.topAnchor],
+        [self.dashboardTableView.bottomAnchor constraintEqualToAnchor:self.pagingScrollView.bottomAnchor],
+        [self.dashboardTableView.leadingAnchor constraintEqualToAnchor:self.pagingScrollView.leadingAnchor],
+        [self.dashboardTableView.widthAnchor constraintEqualToAnchor:self.pagingScrollView.widthAnchor],
+        [self.dashboardTableView.heightAnchor constraintEqualToAnchor:self.pagingScrollView.heightAnchor],
         
-        [topBar.topAnchor constraintEqualToAnchor:self.consoleContainer.topAnchor],
-        [topBar.leadingAnchor constraintEqualToAnchor:self.consoleContainer.leadingAnchor],
-        [topBar.trailingAnchor constraintEqualToAnchor:self.consoleContainer.trailingAnchor],
-        [topBar.heightAnchor constraintEqualToConstant:38],
+        [self.consoleView.topAnchor constraintEqualToAnchor:self.pagingScrollView.topAnchor constant:8],
+        [self.consoleView.bottomAnchor constraintEqualToAnchor:self.pagingScrollView.bottomAnchor constant:-8],
+        [self.consoleView.leadingAnchor constraintEqualToAnchor:self.dashboardTableView.trailingAnchor constant:16],
+        [self.consoleView.trailingAnchor constraintEqualToAnchor:self.pagingScrollView.trailingAnchor constant:-16],
+        [self.consoleView.widthAnchor constraintEqualToAnchor:self.pagingScrollView.widthAnchor constant:-32],
+        [self.consoleView.heightAnchor constraintEqualToAnchor:self.pagingScrollView.heightAnchor constant:-16],
         
-        [lbl.leadingAnchor constraintEqualToAnchor:topBar.leadingAnchor constant:16],
+        [topBar.topAnchor constraintEqualToAnchor:self.consoleView.topAnchor],
+        [topBar.leadingAnchor constraintEqualToAnchor:self.consoleView.leadingAnchor],
+        [topBar.trailingAnchor constraintEqualToAnchor:self.consoleView.trailingAnchor],
+        [topBar.heightAnchor constraintEqualToConstant:36],
+        
+        [lbl.leadingAnchor constraintEqualToAnchor:topBar.leadingAnchor constant:14],
         [lbl.centerYAnchor constraintEqualToAnchor:topBar.centerYAnchor],
         
-        [clearBtn.trailingAnchor constraintEqualToAnchor:topBar.trailingAnchor constant:-16],
+        [clearBtn.trailingAnchor constraintEqualToAnchor:topBar.trailingAnchor constant:-14],
         [clearBtn.centerYAnchor constraintEqualToAnchor:topBar.centerYAnchor],
         
         [self.consoleTextView.topAnchor constraintEqualToAnchor:topBar.bottomAnchor],
-        [self.consoleTextView.leadingAnchor constraintEqualToAnchor:self.consoleContainer.leadingAnchor],
-        [self.consoleTextView.trailingAnchor constraintEqualToAnchor:self.consoleContainer.trailingAnchor],
-        [self.consoleTextView.bottomAnchor constraintEqualToAnchor:self.consoleContainer.bottomAnchor]
+        [self.consoleTextView.leadingAnchor constraintEqualToAnchor:self.consoleView.leadingAnchor],
+        [self.consoleTextView.trailingAnchor constraintEqualToAnchor:self.consoleView.trailingAnchor],
+        [self.consoleTextView.bottomAnchor constraintEqualToAnchor:self.consoleView.bottomAnchor]
     ]];
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    [self updatePillPositionFromScrollProgress];
+}
+
+#pragma mark - Telegram Sliding Pill Dynamic Interpolation
+
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    if (scrollView == self.pagingScrollView) {
+        [self updatePillPositionFromScrollProgress];
+    }
+}
+
+- (void)updatePillPositionFromScrollProgress {
+    CGFloat totalW = self.tabBarBlurView.bounds.size.width;
+    CGFloat h = self.tabBarBlurView.bounds.size.height;
+    if (totalW <= 0 || h <= 0) return;
+    
+    CGFloat pageWidth = self.pagingScrollView.bounds.size.width;
+    if (pageWidth <= 0) return;
+    
+    CGFloat progress = self.pagingScrollView.contentOffset.x / pageWidth;
+    progress = fmax(0.0, fmin(1.0, progress));
+    
+    CGFloat padding = 3.0;
+    CGFloat pillW = (totalW / 2.0) - (padding * 2);
+    CGFloat pillH = h - (padding * 2);
+    CGFloat pillX = padding + (progress * (totalW / 2.0));
+    
+    self.slidingPillIndicator.frame = CGRectMake(pillX, padding, pillW, pillH);
+    
+    // Dynamic text color interpolation
+    if (progress < 0.5) {
+        [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+        [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
+        self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+    } else {
+        [self.dashboardTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
+        self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+        [self.consoleTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    }
+}
+
+- (void)selectDashboardTab {
+    UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+    [haptic impactOccurred];
+    [self.pagingScrollView setContentOffset:CGPointMake(0, 0) animated:YES];
+}
+
+- (void)selectConsoleTab {
+    UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+    [haptic impactOccurred];
+    CGFloat pageWidth = self.pagingScrollView.bounds.size.width;
+    [self.pagingScrollView setContentOffset:CGPointMake(pageWidth, 0) animated:YES];
 }
 
 #pragma mark - TableView Data Source
@@ -380,9 +369,9 @@
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"MHAAppleCell"];
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"MHATelegramCell"];
     if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"MHAAppleCell"];
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"MHATelegramCell"];
         cell.backgroundColor = [UIColor colorWithRed:0.07 green:0.07 blue:0.09 alpha:1.0];
         cell.layer.cornerRadius = 12;
         cell.layer.cornerCurve = kCACornerCurveContinuous;
@@ -455,8 +444,11 @@
     }
     
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!self.consoleContainer.hidden) {
-            [self refreshConsoleDisplay];
+        self.consoleBadgeLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)self.logHistory.count];
+        self.consoleTextView.text = [self.logHistory componentsJoinedByString:@"\n"];
+        if (self.consoleTextView.text.length > 0) {
+            NSRange bottom = NSMakeRange(self.consoleTextView.text.length - 1, 1);
+            [self.consoleTextView scrollRangeToVisible:bottom];
         }
     });
 }
@@ -464,20 +456,13 @@
 - (void)serverClientCountDidChange:(NSUInteger)count {
     self.activeClientsCount = count;
     dispatch_async(dispatch_get_main_queue(), ^{
-        [self.tableView reloadData];
+        [self.dashboardTableView reloadData];
     });
-}
-
-- (void)refreshConsoleDisplay {
-    self.consoleTextView.text = [self.logHistory componentsJoinedByString:@"\n"];
-    if (self.consoleTextView.text.length > 0) {
-        NSRange bottom = NSMakeRange(self.consoleTextView.text.length - 1, 1);
-        [self.consoleTextView scrollRangeToVisible:bottom];
-    }
 }
 
 - (void)clearLogs {
     [self.logHistory removeAllObjects];
+    self.consoleBadgeLabel.text = @"0";
     self.consoleTextView.text = @"";
 }
 
