@@ -27,8 +27,8 @@ jobs:
             -o MobileHouseArrestBridge \
             main.m MCMBridge.m
           
-          # Ad-hoc codesign with required identifier
-          codesign -s - --identifier com.apple.mobile.MobileHouseArrest MobileHouseArrestBridge
+          # Ad-hoc codesign binary with required identifier
+          codesign -f -s - --identifier com.apple.mobile.MobileHouseArrest MobileHouseArrestBridge
           file MobileHouseArrestBridge
 
       - name: Package IPA
@@ -36,7 +36,7 @@ jobs:
           mkdir -p Payload/MobileHouseArrestBridge.app
           cp MobileHouseArrestBridge Payload/MobileHouseArrestBridge.app/
           cp Info.plist Payload/MobileHouseArrestBridge.app/
-          codesign -s - --identifier com.apple.mobile.MobileHouseArrest Payload/MobileHouseArrestBridge.app
+          codesign -f -s - --identifier com.apple.mobile.MobileHouseArrest Payload/MobileHouseArrestBridge.app
           zip -r MobileHouseArrestBridge.ipa Payload
 
       - name: Upload Build Artifacts
