@@ -15,12 +15,15 @@
 
 @interface GlassStatusViewController () <UIScrollViewDelegate>
 
-// Telegram-iOS LiquidLens TitleView Architecture
+// Telegram-iOS LiquidLens Hierarchy
 @property (nonatomic, strong) TelegramTitleBar *telegramGlassTitleView;
+@property (nonatomic, strong) UIView *baseContainerView;
 @property (nonatomic, strong) UIVisualEffectView *glassBackdropView;
 @property (nonatomic, strong) UIView *liquidLensView;
+@property (nonatomic, strong) UIView *liftedContainerView;
 @property (nonatomic, strong) UIVisualEffectView *slidingPillGlassView;
 @property (nonatomic, strong) CAGradientLayer *specularShineLayer;
+@property (nonatomic, strong) UIView *interactiveContentView;
 @property (nonatomic, strong) UIButton *dashboardTabBtn;
 @property (nonatomic, strong) UIButton *consoleTabBtn;
 @property (nonatomic, strong) UILabel *consoleUnreadBadge;
@@ -94,15 +97,20 @@
     UIBarButtonItem *shareItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(shareLogs)];
     self.navigationItem.rightBarButtonItem = shareItem;
     
-    // Telegram-iOS Liquid Lens Container (236 x 32)
+    // 1. Root Container
     self.telegramGlassTitleView = [[TelegramTitleBar alloc] initWithFrame:CGRectMake(0, 0, 236, 32)];
     self.telegramGlassTitleView.userInteractionEnabled = YES;
     self.telegramGlassTitleView.clipsToBounds = NO;
     
-    // 1. Telegram-iOS Resting Background with ColorMatrix CAFilter
+    // 2. Base Container
+    self.baseContainerView = [[UIView alloc] initWithFrame:self.telegramGlassTitleView.bounds];
+    self.baseContainerView.userInteractionEnabled = NO;
+    [self.telegramGlassTitleView addSubview:self.baseContainerView];
+    
+    // 3. Resting Background Blur
     UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
     self.glassBackdropView = [[UIVisualEffectView alloc] initWithEffect:blur];
-    self.glassBackdropView.frame = self.telegramGlassTitleView.bounds;
+    self.glassBackdropView.frame = self.baseContainerView.bounds;
     self.glassBackdropView.layer.cornerRadius = 16;
     self.glassBackdropView.layer.cornerCurve = kCACornerCurveContinuous;
     self.glassBackdropView.layer.masksToBounds = YES;
@@ -111,9 +119,9 @@
     self.glassBackdropView.backgroundColor = [UIColor colorWithWhite:0.16 alpha:0.45];
     self.glassBackdropView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.12].CGColor;
     self.glassBackdropView.layer.borderWidth = 0.5;
-    [self.telegramGlassTitleView addSubview:self.glassBackdropView];
+    [self.baseContainerView addSubview:self.glassBackdropView];
     
-    // Apply Telegram's exact dark color matrix filter to backdrop layer
+    // Apply Telegram ColorMatrix CAFilter
     if (self.glassBackdropView.layer.sublayers.count > 0) {
         CALayer *sublayer = self.glassBackdropView.layer.sublayers[0];
         Class caFilterClass = NSClassFromString(@"CAFilter");
@@ -133,10 +141,18 @@
         }
     }
     
-    // 2. Telegram Sliding Frosted Glass Pill (UIVisualEffectView + Specular 45-deg Caustic Gradient)
+    // 4. Lifted Container (Plain UIView container for sliding lens)
+    self.liftedContainerView = [[UIView alloc] initWithFrame:CGRectMake(2, 2, 114, 28)];
+    self.liftedContainerView.userInteractionEnabled = NO;
+    self.liftedContainerView.layer.cornerRadius = 14;
+    self.liftedContainerView.layer.cornerCurve = kCACornerCurveContinuous;
+    self.liftedContainerView.clipsToBounds = YES;
+    [self.telegramGlassTitleView addSubview:self.liftedContainerView];
+    
+    // Inside Lifted Container: Sliding Frosted Pill + Specular Highlight
     UIBlurEffect *pillBlur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleLight];
     self.slidingPillGlassView = [[UIVisualEffectView alloc] initWithEffect:pillBlur];
-    self.slidingPillGlassView.frame = CGRectMake(2, 2, 114, 28);
+    self.slidingPillGlassView.frame = self.liftedContainerView.bounds;
     self.slidingPillGlassView.layer.cornerRadius = 14;
     self.slidingPillGlassView.layer.cornerCurve = kCACornerCurveContinuous;
     self.slidingPillGlassView.layer.masksToBounds = YES;
@@ -144,10 +160,11 @@
     self.slidingPillGlassView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.40].CGColor;
     self.slidingPillGlassView.layer.borderWidth = 0.8;
     self.slidingPillGlassView.userInteractionEnabled = NO;
+    [self.liftedContainerView addSubview:self.slidingPillGlassView];
     
     // Specular Highlight Layer
     self.specularShineLayer = [CAGradientLayer layer];
-    self.specularShineLayer.frame = CGRectMake(0, 0, 114, 28);
+    self.specularShineLayer.frame = self.liftedContainerView.bounds;
     self.specularShineLayer.colors = @[
         (id)[UIColor colorWithWhite:1.0 alpha:0.55].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:0.08].CGColor,
@@ -159,9 +176,12 @@
     self.specularShineLayer.cornerCurve = kCACornerCurveContinuous;
     [self.slidingPillGlassView.contentView.layer addSublayer:self.specularShineLayer];
     
-    [self.telegramGlassTitleView addSubview:self.slidingPillGlassView];
+    // 5. Interactive Content View Container
+    self.interactiveContentView = [[UIView alloc] initWithFrame:self.telegramGlassTitleView.bounds];
+    self.interactiveContentView.userInteractionEnabled = YES;
+    [self.telegramGlassTitleView addSubview:self.interactiveContentView];
     
-    // 3. Apple _UILiquidLensView on iOS 26+ (Telegram LiquidLensView exact binding)
+    // 6. Bind Apple _UILiquidLensView on iOS 26+
     Class liquidLensClass = NSClassFromString(@"_UILiquidLensView");
     if (liquidLensClass) {
         id allocObj = [liquidLensClass alloc];
@@ -175,15 +195,15 @@
                 
                 SEL setLiftedContainerSel = sel_registerName("setLiftedContainerView:");
                 if ([self.liquidLensView respondsToSelector:setLiftedContainerSel]) {
-                    ((void (*)(id, SEL, id))objc_msgSend)(self.liquidLensView, setLiftedContainerSel, self.telegramGlassTitleView);
+                    ((void (*)(id, SEL, id))objc_msgSend)(self.liquidLensView, setLiftedContainerSel, self.baseContainerView);
                 }
                 SEL setLiftedContentSel = sel_registerName("setLiftedContentView:");
                 if ([self.liquidLensView respondsToSelector:setLiftedContentSel]) {
-                    ((void (*)(id, SEL, id))objc_msgSend)(self.liquidLensView, setLiftedContentSel, self.slidingPillGlassView);
+                    ((void (*)(id, SEL, id))objc_msgSend)(self.liquidLensView, setLiftedContentSel, self.liftedContainerView);
                 }
                 SEL setOverridePunchSel = sel_registerName("setOverridePunchoutView:");
                 if ([self.liquidLensView respondsToSelector:setOverridePunchSel]) {
-                    ((void (*)(id, SEL, id))objc_msgSend)(self.liquidLensView, setOverridePunchSel, self.glassBackdropView.contentView);
+                    ((void (*)(id, SEL, id))objc_msgSend)(self.liquidLensView, setOverridePunchSel, self.interactiveContentView);
                 }
                 SEL setLiftedModeSel = sel_registerName("setLiftedContentMode:");
                 if ([self.liquidLensView respondsToSelector:setLiftedModeSel]) {
@@ -198,19 +218,19 @@
                     ((void (*)(id, SEL, BOOL))objc_msgSend)(self.liquidLensView, setWarpsSel, YES);
                 }
                 [self.liquidLensView setValue:[UIColor colorWithWhite:0.0 alpha:0.1] forKey:@"restingBackgroundColor"];
-                [self.telegramGlassTitleView addSubview:self.liquidLensView];
+                [self.telegramGlassTitleView insertSubview:self.liquidLensView belowSubview:self.interactiveContentView];
             }
         }
     }
     
-    // 4. Tab 1: Dashboard (Top-most interactive layer)
+    // 7. Interactive Buttons inside interactiveContentView
     self.dashboardTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     self.dashboardTabBtn.frame = CGRectMake(0, 0, 118, 32);
     [self.dashboardTabBtn setTitle:@"Dashboard" forState:UIControlStateNormal];
     [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     [self.dashboardTabBtn addTarget:self action:@selector(selectDashboard) forControlEvents:UIControlEventTouchUpInside];
-    [self.telegramGlassTitleView addSubview:self.dashboardTabBtn];
+    [self.interactiveContentView addSubview:self.dashboardTabBtn];
     
     // Status Dot inside Dashboard
     self.liveStatusDot = [[UIView alloc] initWithFrame:CGRectMake(12, 13, 6, 6)];
@@ -219,16 +239,16 @@
     self.liveStatusDot.userInteractionEnabled = NO;
     [self.dashboardTabBtn addSubview:self.liveStatusDot];
     
-    // 5. Tab 2: Console (Top-most interactive layer)
+    // Console Tab Button
     self.consoleTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     self.consoleTabBtn.frame = CGRectMake(118, 0, 118, 32);
     [self.consoleTabBtn setTitle:@"Console" forState:UIControlStateNormal];
     [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
     self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     [self.consoleTabBtn addTarget:self action:@selector(selectConsole) forControlEvents:UIControlEventTouchUpInside];
-    [self.telegramGlassTitleView addSubview:self.consoleTabBtn];
+    [self.interactiveContentView addSubview:self.consoleTabBtn];
     
-    // Telegram-style Folder Badge Count
+    // Telegram Badge
     self.consoleUnreadBadge = [[UILabel alloc] initWithFrame:CGRectMake(88, 8, 18, 16)];
     self.consoleUnreadBadge.text = @"0";
     self.consoleUnreadBadge.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightBold];
@@ -239,9 +259,6 @@
     self.consoleUnreadBadge.layer.masksToBounds = YES;
     self.consoleUnreadBadge.userInteractionEnabled = NO;
     [self.consoleTabBtn addSubview:self.consoleUnreadBadge];
-    
-    [self.telegramGlassTitleView bringSubviewToFront:self.dashboardTabBtn];
-    [self.telegramGlassTitleView bringSubviewToFront:self.consoleTabBtn];
     
     self.navigationItem.titleView = self.telegramGlassTitleView;
 }
@@ -363,7 +380,7 @@
         
         CGFloat pillWidth = 114.0;
         CGFloat pillX = 2.0 + (progress * 118.0);
-        self.slidingPillGlassView.frame = CGRectMake(pillX, 2.0, pillWidth, 28.0);
+        self.liftedContainerView.frame = CGRectMake(pillX, 2.0, pillWidth, 28.0);
         
         if (self.liquidLensView) {
             self.liquidLensView.center = CGPointMake(pillX + (pillWidth / 2.0), 16.0);
