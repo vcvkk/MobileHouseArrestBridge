@@ -1,6 +1,8 @@
 #import "GlassStatusViewController.h"
 #import <sys/utsname.h>
 #import <QuartzCore/QuartzCore.h>
+#import <objc/message.h>
+#import <objc/runtime.h>
 
 @interface GlassStatusViewController ()
 
