@@ -1,22 +1,24 @@
 #import "GlassStatusViewController.h"
 #import <sys/utsname.h>
+#import <QuartzCore/QuartzCore.h>
 
 @interface GlassStatusViewController ()
 
-// Liquid Glass Capsule Switcher
-@property (nonatomic, strong) UIVisualEffectView *glassCapsuleContainer;
-@property (nonatomic, strong) UIView *glassPillIndicator;
+// Apple HIG Liquid Glass Floating Navigation Component
+@property (nonatomic, strong) UIVisualEffectView *liquidGlassContainer;
+@property (nonatomic, strong) CAGradientLayer *specularRimBorder;
+@property (nonatomic, strong) UIVisualEffectView *glassPillEffectView;
 @property (nonatomic, strong) UIButton *dashboardTabBtn;
 @property (nonatomic, strong) UIButton *consoleTabBtn;
 @property (nonatomic, assign) NSInteger selectedTab;
 
-// Content Views
+// OLED Content Views
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UIView *consoleContainer;
 @property (nonatomic, strong) UITextView *consoleTextView;
 @property (nonatomic, strong) NSMutableArray<NSString *> *logHistory;
 
-// Host Metadata
+// Host System Metadata
 @property (nonatomic, strong) NSString *deviceModel;
 @property (nonatomic, strong) NSString *osVersion;
 @property (nonatomic, assign) NSUInteger activeClientsCount;
@@ -29,14 +31,14 @@
     [super viewDidLoad];
     self.title = @"HouseArrest";
     
-    // True Black OLED Background
+    // OLED True Black Canvas
     self.view.backgroundColor = [UIColor blackColor];
     self.logHistory = [NSMutableArray array];
     self.selectedTab = 0;
     
     [self loadSystemInfo];
     [self setupNavigationBar];
-    [self setupLiquidGlassSwitcher];
+    [self setupNativeLiquidGlassNavigation];
     [self setupTableView];
     [self setupConsoleView];
     
@@ -46,7 +48,7 @@
     if (![[MHAServer sharedServer] startOnPort:8080 error:&error]) {
         [self serverDidLogMessage:[NSString stringWithFormat:@"Failed to bind port 8080: %@", error.localizedDescription] isError:YES];
     } else {
-        [self serverDidLogMessage:@"HouseArrest daemon listening on 0.0.0.0:8080" isError:NO];
+        [self serverDidLogMessage:@"HouseArrest daemon active on 0.0.0.0:8080" isError:NO];
         [self serverDidLogMessage:@"USBMux bridge ready for incoming TCP connections." isError:NO];
     }
 }
@@ -70,8 +72,14 @@
         [appearance configureWithOpaqueBackground];
         appearance.backgroundColor = [UIColor blackColor];
         appearance.shadowColor = [UIColor clearColor];
-        appearance.titleTextAttributes = @{NSForegroundColorAttributeName: [UIColor whiteColor]};
-        appearance.largeTitleTextAttributes = @{NSForegroundColorAttributeName: [UIColor whiteColor], NSFontAttributeName: [UIFont systemFontOfSize:32 weight:UIFontWeightBold]};
+        appearance.titleTextAttributes = @{
+            NSForegroundColorAttributeName: [UIColor whiteColor],
+            NSFontAttributeName: [UIFont systemFontOfSize:17 weight:UIFontWeightBold]
+        };
+        appearance.largeTitleTextAttributes = @{
+            NSForegroundColorAttributeName: [UIColor whiteColor],
+            NSFontAttributeName: [UIFont systemFontOfSize:34 weight:UIFontWeightHeavy]
+        };
         
         self.navigationController.navigationBar.standardAppearance = appearance;
         self.navigationController.navigationBar.scrollEdgeAppearance = appearance;
@@ -82,91 +90,134 @@
     }
 }
 
-#pragma mark - iOS 26 Liquid Glass Capsule Switcher
+#pragma mark - Native Apple HIG Liquid Glass Navigation (iOS 26 Architecture)
 
-- (void)setupLiquidGlassSwitcher {
-    // Outer floating Liquid Glass Capsule
-    UIBlurEffect *glassBlur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
-    self.glassCapsuleContainer = [[UIVisualEffectView alloc] initWithEffect:glassBlur];
-    self.glassCapsuleContainer.translatesAutoresizingMaskIntoConstraints = NO;
-    self.glassCapsuleContainer.layer.cornerRadius = 23;
-    self.glassCapsuleContainer.layer.masksToBounds = YES;
-    self.glassCapsuleContainer.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
-    self.glassCapsuleContainer.layer.borderWidth = 1.0;
-    self.glassCapsuleContainer.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.10 alpha:0.55];
-    [self.view addSubview:self.glassCapsuleContainer];
+- (void)setupNativeLiquidGlassNavigation {
+    // 1. Dynamic Glass Effect Lookup (UIGlassEffect on iOS 26+ with fallback to UltraThinMaterial)
+    UIVisualEffect *glassEffect = nil;
+    Class glassClass = NSClassFromString(@"UIGlassEffect");
+    if (glassClass && [glassClass respondsToSelector:sel_registerName("effectWithStyle:")]) {
+        glassEffect = ((id (*)(id, SEL, NSInteger))objc_msgSend)(glassClass, sel_registerName("effectWithStyle:"), 0);
+    }
+    if (!glassEffect) {
+        glassEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
+    }
     
-    // Morphing Glass Pill Indicator
-    self.glassPillIndicator = [[UIView alloc] init];
-    self.glassPillIndicator.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.16];
-    self.glassPillIndicator.layer.cornerRadius = 19;
-    self.glassPillIndicator.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.25].CGColor;
-    self.glassPillIndicator.layer.borderWidth = 1.0;
-    self.glassPillIndicator.layer.shadowColor = [UIColor colorWithWhite:1.0 alpha:0.20].CGColor;
-    self.glassPillIndicator.layer.shadowRadius = 8;
-    self.glassPillIndicator.layer.shadowOpacity = 0.5;
-    [self.glassCapsuleContainer.contentView addSubview:self.glassPillIndicator];
+    // 2. Outer Liquid Glass Capsule Container (concentric continuous capsule)
+    self.liquidGlassContainer = [[UIVisualEffectView alloc] initWithEffect:glassEffect];
+    self.liquidGlassContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    self.liquidGlassContainer.layer.cornerRadius = 24;
+    self.liquidGlassContainer.layer.cornerCurve = kCACornerCurveContinuous;
+    self.liquidGlassContainer.layer.masksToBounds = YES;
+    self.liquidGlassContainer.backgroundColor = [UIColor colorWithWhite:0.10 alpha:0.40];
+    [self.view addSubview:self.liquidGlassContainer];
     
-    // Tab Buttons
+    // 3. Specular Incident Light Rim (Apple HIG 45° refraction highlight)
+    self.specularRimBorder = [CAGradientLayer layer];
+    self.specularRimBorder.cornerRadius = 24;
+    self.specularRimBorder.cornerCurve = kCACornerCurveContinuous;
+    self.specularRimBorder.colors = @[
+        (id)[UIColor colorWithWhite:1.0 alpha:0.40].CGColor, // Top-left specular highlight
+        (id)[UIColor colorWithWhite:1.0 alpha:0.12].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.04].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.20].CGColor  // Bottom-right caustic reflection
+    ];
+    self.specularRimBorder.startPoint = CGPointMake(0.0, 0.0);
+    self.specularRimBorder.endPoint = CGPointMake(1.0, 1.0);
+    
+    CAShapeLayer *rimMask = [CAShapeLayer layer];
+    rimMask.lineWidth = 1.2;
+    rimMask.fillColor = [UIColor clearColor].CGColor;
+    rimMask.strokeColor = [UIColor whiteColor].CGColor;
+    self.specularRimBorder.mask = rimMask;
+    [self.liquidGlassContainer.layer addSublayer:self.specularRimBorder];
+    
+    // 4. Morphing Glass Selection Pill (Concentric Geometry: r_inner = r_outer - padding = 24 - 4 = 20)
+    UIBlurEffect *pillBlur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterialDark];
+    self.glassPillEffectView = [[UIVisualEffectView alloc] initWithEffect:pillBlur];
+    self.glassPillEffectView.layer.cornerRadius = 20;
+    self.glassPillEffectView.layer.cornerCurve = kCACornerCurveContinuous;
+    self.glassPillEffectView.layer.masksToBounds = YES;
+    self.glassPillEffectView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.18];
+    self.glassPillEffectView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.28].CGColor;
+    self.glassPillEffectView.layer.borderWidth = 1.0;
+    [self.liquidGlassContainer.contentView addSubview:self.glassPillEffectView];
+    
+    // 5. Interactive Touch Targets (HIG Touch Area >= 44pt)
     self.dashboardTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     self.dashboardTabBtn.translatesAutoresizingMaskIntoConstraints = NO;
     [self.dashboardTabBtn setTitle:@"Dashboard" forState:UIControlStateNormal];
     [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
     [self.dashboardTabBtn addTarget:self action:@selector(dashboardTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.glassCapsuleContainer.contentView addSubview:self.dashboardTabBtn];
+    [self.dashboardTabBtn addTarget:self action:@selector(touchDown:) forControlEvents:UIControlEventTouchDown];
+    [self.dashboardTabBtn addTarget:self action:@selector(touchUp:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
+    [self.liquidGlassContainer.contentView addSubview:self.dashboardTabBtn];
     
     self.consoleTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     self.consoleTabBtn.translatesAutoresizingMaskIntoConstraints = NO;
     [self.consoleTabBtn setTitle:@"Console Logs" forState:UIControlStateNormal];
-    [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
+    [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
     self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
     [self.consoleTabBtn addTarget:self action:@selector(consoleTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.glassCapsuleContainer.contentView addSubview:self.consoleTabBtn];
+    [self.consoleTabBtn addTarget:self action:@selector(touchDown:) forControlEvents:UIControlEventTouchDown];
+    [self.consoleTabBtn addTarget:self action:@selector(touchUp:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
+    [self.liquidGlassContainer.contentView addSubview:self.consoleTabBtn];
     
     UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [self.glassCapsuleContainer.topAnchor constraintEqualToAnchor:guide.topAnchor constant:6],
-        [self.glassCapsuleContainer.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
-        [self.glassCapsuleContainer.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
-        [self.glassCapsuleContainer.heightAnchor constraintEqualToConstant:46],
+        [self.liquidGlassContainer.topAnchor constraintEqualToAnchor:guide.topAnchor constant:4],
+        [self.liquidGlassContainer.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
+        [self.liquidGlassContainer.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
+        [self.liquidGlassContainer.heightAnchor constraintEqualToConstant:48],
         
-        [self.dashboardTabBtn.leadingAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.leadingAnchor],
-        [self.dashboardTabBtn.topAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.topAnchor],
-        [self.dashboardTabBtn.bottomAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.bottomAnchor],
-        [self.dashboardTabBtn.widthAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.widthAnchor multiplier:0.5],
+        [self.dashboardTabBtn.leadingAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.leadingAnchor],
+        [self.dashboardTabBtn.topAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.topAnchor],
+        [self.dashboardTabBtn.bottomAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.bottomAnchor],
+        [self.dashboardTabBtn.widthAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.widthAnchor multiplier:0.5],
         
-        [self.consoleTabBtn.trailingAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.trailingAnchor],
-        [self.consoleTabBtn.topAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.topAnchor],
-        [self.consoleTabBtn.bottomAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.bottomAnchor],
-        [self.consoleTabBtn.widthAnchor constraintEqualToAnchor:self.glassCapsuleContainer.contentView.widthAnchor multiplier:0.5]
+        [self.consoleTabBtn.trailingAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.trailingAnchor],
+        [self.consoleTabBtn.topAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.topAnchor],
+        [self.consoleTabBtn.bottomAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.bottomAnchor],
+        [self.consoleTabBtn.widthAnchor constraintEqualToAnchor:self.liquidGlassContainer.contentView.widthAnchor multiplier:0.5]
     ]];
 }
 
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
+    
+    // Update specular rim border geometry
+    self.specularRimBorder.frame = self.liquidGlassContainer.bounds;
+    CAShapeLayer *mask = (CAShapeLayer *)self.specularRimBorder.mask;
+    if (mask) {
+        UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:CGRectInset(self.liquidGlassContainer.bounds, 0.6, 0.6)
+                                                        cornerRadius:24];
+        mask.path = path.CGPath;
+    }
+    
     [self updatePillFrameAnimated:NO];
 }
 
 - (void)updatePillFrameAnimated:(BOOL)animated {
-    CGFloat totalW = self.glassCapsuleContainer.bounds.size.width;
-    CGFloat h = self.glassCapsuleContainer.bounds.size.height;
+    CGFloat totalW = self.liquidGlassContainer.bounds.size.width;
+    CGFloat h = self.liquidGlassContainer.bounds.size.height;
     if (totalW <= 0 || h <= 0) return;
     
-    CGFloat pillW = (totalW / 2.0) - 8;
-    CGFloat pillH = h - 8;
-    CGFloat pillX = (self.selectedTab == 0) ? 4 : (totalW / 2.0) + 4;
-    CGRect targetRect = CGRectMake(pillX, 4, pillW, pillH);
+    CGFloat padding = 4.0;
+    CGFloat pillW = (totalW / 2.0) - (padding * 2);
+    CGFloat pillH = h - (padding * 2);
+    CGFloat pillX = (self.selectedTab == 0) ? padding : (totalW / 2.0) + padding;
+    CGRect targetRect = CGRectMake(pillX, padding, pillW, pillH);
     
     void (^animations)(void) = ^{
-        self.glassPillIndicator.frame = targetRect;
+        self.glassPillEffectView.frame = targetRect;
         if (self.selectedTab == 0) {
             [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
             self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-            [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
+            [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
             self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
         } else {
-            [self.dashboardTabBtn setTitleColor:[UIColor colorWithWhite:0.60 alpha:1.0] forState:UIControlStateNormal];
+            [self.dashboardTabBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
             self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
             [self.consoleTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
             self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
@@ -176,10 +227,28 @@
     if (animated) {
         UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
         [haptic impactOccurred];
-        [UIView animateWithDuration:0.35 delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0.5 options:UIViewAnimationOptionCurveEaseInOut animations:animations completion:nil];
+        [UIView animateWithDuration:0.38
+                              delay:0
+             usingSpringWithDamping:0.75
+              initialSpringVelocity:0.6
+                            options:UIViewAnimationOptionCurveEaseInOut
+                         animations:animations
+                         completion:nil];
     } else {
         animations();
     }
+}
+
+- (void)touchDown:(UIButton *)btn {
+    [UIView animateWithDuration:0.15 animations:^{
+        self.liquidGlassContainer.transform = CGAffineTransformMakeScale(0.985, 0.985);
+    }];
+}
+
+- (void)touchUp:(UIButton *)btn {
+    [UIView animateWithDuration:0.25 delay:0 usingSpringWithDamping:0.6 initialSpringVelocity:0.5 options:0 animations:^{
+        self.liquidGlassContainer.transform = CGAffineTransformIdentity;
+    } completion:nil];
 }
 
 - (void)dashboardTapped {
@@ -212,14 +281,14 @@
     
     UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [self.tableView.topAnchor constraintEqualToAnchor:self.glassCapsuleContainer.bottomAnchor constant:10],
+        [self.tableView.topAnchor constraintEqualToAnchor:self.liquidGlassContainer.bottomAnchor constant:8],
         [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [self.tableView.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor]
     ]];
 }
 
-#pragma mark - True Black Console Container
+#pragma mark - True Black OLED Console View
 
 - (void)setupConsoleView {
     self.consoleContainer = [[UIView alloc] init];
@@ -227,6 +296,7 @@
     self.consoleContainer.hidden = YES;
     self.consoleContainer.backgroundColor = [UIColor colorWithRed:0.04 green:0.04 blue:0.05 alpha:1.0];
     self.consoleContainer.layer.cornerRadius = 20;
+    self.consoleContainer.layer.cornerCurve = kCACornerCurveContinuous;
     self.consoleContainer.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.12].CGColor;
     self.consoleContainer.layer.borderWidth = 1.0;
     self.consoleContainer.layer.masksToBounds = YES;
@@ -264,7 +334,7 @@
     
     UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [self.consoleContainer.topAnchor constraintEqualToAnchor:self.glassCapsuleContainer.bottomAnchor constant:12],
+        [self.consoleContainer.topAnchor constraintEqualToAnchor:self.liquidGlassContainer.bottomAnchor constant:12],
         [self.consoleContainer.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [self.consoleContainer.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
         [self.consoleContainer.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor constant:-12],
@@ -294,9 +364,9 @@
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 3; // Daemon status, Port, Transport
-    if (section == 1) return 3; // Capabilities: Class 2, Class 7, Class 13
-    if (section == 2) return 3; // Device Model, OS Version, Mach PID
+    if (section == 0) return 3;
+    if (section == 1) return 3;
+    if (section == 2) return 3;
     return 0;
 }
 
@@ -308,10 +378,12 @@
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"MHAOLEDCell"];
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"MHAAppleCell"];
     if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"MHAOLEDCell"];
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"MHAAppleCell"];
         cell.backgroundColor = [UIColor colorWithRed:0.07 green:0.07 blue:0.09 alpha:1.0];
+        cell.layer.cornerRadius = 12;
+        cell.layer.cornerCurve = kCACornerCurveContinuous;
         cell.textLabel.textColor = [UIColor whiteColor];
         cell.textLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightRegular];
         cell.detailTextLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
