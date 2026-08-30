@@ -4,17 +4,23 @@
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 
-// UIGlassEffect is provided by UIKit/UIGlassEffect.h in Xcode 26 SDK (iOS 26+)
-// It inherits from UIVisualEffect and renders native Liquid Glass material.
-
 @interface GlassStatusViewController () <UIScrollViewDelegate>
 
-// Apple Native Liquid Glass
-@property (nonatomic, strong) UIVisualEffectView *glassSegmentContainer;
-@property (nonatomic, strong) UIView *slidingGlassPill;
-@property (nonatomic, strong) UIVisualEffectView *slidingGlassEffectView;
+// Telegram-iOS Floating Liquid Glass Bar Architecture
+@property (nonatomic, strong) UIView *tabsRootContainer;
+@property (nonatomic, strong) UIVisualEffectView *outerGlassContainer;
+@property (nonatomic, strong) UIView *slidingIndicator;
+@property (nonatomic, strong) UIVisualEffectView *indicatorGlassView;
+@property (nonatomic, strong) UIView *indicatorHighlightView;
+
 @property (nonatomic, strong) UIButton *dashboardTabBtn;
 @property (nonatomic, strong) UIButton *consoleTabBtn;
+@property (nonatomic, strong) UILabel *dashboardTitleLabel;
+@property (nonatomic, strong) UILabel *consoleTitleLabel;
+
+// Telegram Spring & State Management
+@property (nonatomic, assign) NSInteger selectedIndex;
+@property (nonatomic, assign) BOOL isProgrammaticAnimating;
 
 // Fullscreen Page Scroll View
 @property (nonatomic, strong) UIScrollView *pagingScrollView;
@@ -30,6 +36,12 @@
 
 @end
 
+static const CGFloat kBarWidth = 240.0;
+static const CGFloat kBarHeight = 36.0;
+static const CGFloat kPadding = 3.0;
+static const CGFloat kPillHeight = 30.0;
+static const CGFloat kBasePillWidth = 115.0;
+
 @implementation GlassStatusViewController
 
 - (void)viewDidLoad {
@@ -37,9 +49,11 @@
     
     self.view.backgroundColor = [UIColor blackColor];
     self.logHistory = [NSMutableArray array];
+    self.selectedIndex = 0;
+    self.isProgrammaticAnimating = NO;
     
     [self loadSystemInfo];
-    [self setupAppleLiquidGlassNavigationBar];
+    [self setupTelegramLiquidGlassNavigationBar];
     [self setupFullscreenPaging];
     
     [MHAServer sharedServer].delegate = self;
@@ -57,34 +71,30 @@
     struct utsname systemInfo;
     uname(&systemInfo);
     self.deviceModel = [NSString stringWithCString:systemInfo.machine encoding:NSUTF8StringEncoding] ?: @"iPhone";
-    
     NSOperatingSystemVersion os = [[NSProcessInfo processInfo] operatingSystemVersion];
     self.osVersion = [NSString stringWithFormat:@"iOS %ld.%ld.%ld", (long)os.majorVersion, (long)os.minorVersion, (long)os.patchVersion];
     self.activeClientsCount = 0;
 }
 
-#pragma mark - Apple Official UIGlassEffect Liquid Glass Navigation
+#pragma mark - Apple UIGlassEffect Factory
 
-- (UIVisualEffect *)createGlassEffect {
-    // Use Apple's official UIGlassEffect (iOS 26+, Xcode 26 SDK)
+- (UIVisualEffect *)createAppleGlassEffect {
     Class glassClass = NSClassFromString(@"UIGlassEffect");
     if (glassClass) {
-        // UIGlassEffect inherits from UIVisualEffect
-        // Simple [[UIGlassEffect alloc] init] creates the standard glass material
         UIVisualEffect *glass = [[glassClass alloc] init];
         if (glass) return glass;
     }
-    // Fallback for older iOS (should not happen on iOS 26+ devices)
     return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterialDark];
 }
 
-- (void)setupAppleLiquidGlassNavigationBar {
+#pragma mark - Telegram-iOS Native Liquid Glass Navigation Bar
+
+- (void)setupTelegramLiquidGlassNavigationBar {
     if (!self.navigationController) return;
     
     self.navigationController.navigationBar.prefersLargeTitles = NO;
-    self.navigationController.navigationBar.tintColor = [UIColor colorWithRed:0.22 green:0.53 blue:0.95 alpha:1.0];
+    self.navigationController.navigationBar.tintColor = [UIColor colorWithRed:0.20 green:0.55 blue:0.95 alpha:1.0];
     
-    // Transparent navbar so glass effect refracts content behind it
     UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
     [appearance configureWithTransparentBackground];
     appearance.shadowColor = [UIColor clearColor];
@@ -92,56 +102,96 @@
     self.navigationController.navigationBar.scrollEdgeAppearance = appearance;
     self.navigationController.navigationBar.compactAppearance = appearance;
     
-    // Right Action: Export Logs
     UIBarButtonItem *shareItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(shareLogs)];
     self.navigationItem.rightBarButtonItem = shareItem;
     
-    // === Apple UIGlassEffect Container (Outer Capsule) ===
-    // UIVisualEffectView + UIGlassEffect = real Liquid Glass material
-    UIVisualEffect *containerGlass = [self createGlassEffect];
-    self.glassSegmentContainer = [[UIVisualEffectView alloc] initWithEffect:containerGlass];
-    self.glassSegmentContainer.frame = CGRectMake(0, 0, 240, 34);
-    self.glassSegmentContainer.layer.cornerRadius = 17;
-    self.glassSegmentContainer.layer.cornerCurve = kCACornerCurveContinuous;
-    self.glassSegmentContainer.layer.masksToBounds = YES;
-    self.glassSegmentContainer.userInteractionEnabled = YES;
+    // === 1. Root Container for Navigation Bar ===
+    self.tabsRootContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kBarWidth, kBarHeight)];
+    self.tabsRootContainer.backgroundColor = [UIColor clearColor];
     
-    // === Apple UIGlassEffect Sliding Pill (Inner Active Indicator) ===
-    self.slidingGlassPill = [[UIView alloc] initWithFrame:CGRectMake(3, 3, 114, 28)];
-    self.slidingGlassPill.layer.cornerRadius = 14;
-    self.slidingGlassPill.layer.cornerCurve = kCACornerCurveContinuous;
-    self.slidingGlassPill.clipsToBounds = YES;
-    self.slidingGlassPill.userInteractionEnabled = NO;
+    // === 2. Outer Liquid Glass Bar (Telegram GlassBackgroundView on iOS 26) ===
+    UIVisualEffect *outerGlass = [self createAppleGlassEffect];
+    self.outerGlassContainer = [[UIVisualEffectView alloc] initWithEffect:outerGlass];
+    self.outerGlassContainer.frame = self.tabsRootContainer.bounds;
+    self.outerGlassContainer.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    self.outerGlassContainer.layer.cornerRadius = kBarHeight * 0.5;
+    self.outerGlassContainer.layer.cornerCurve = kCACornerCurveContinuous;
+    self.outerGlassContainer.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.15].CGColor;
+    self.outerGlassContainer.layer.borderWidth = 0.5;
+    self.outerGlassContainer.clipsToBounds = YES;
+    [self.tabsRootContainer addSubview:self.outerGlassContainer];
     
-    UIVisualEffect *pillGlass = [self createGlassEffect];
-    self.slidingGlassEffectView = [[UIVisualEffectView alloc] initWithEffect:pillGlass];
-    self.slidingGlassEffectView.frame = self.slidingGlassPill.bounds;
-    self.slidingGlassEffectView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.slidingGlassEffectView.layer.cornerRadius = 14;
-    self.slidingGlassEffectView.layer.cornerCurve = kCACornerCurveContinuous;
-    self.slidingGlassEffectView.layer.masksToBounds = YES;
-    [self.slidingGlassPill addSubview:self.slidingGlassEffectView];
+    // === 3. Active Sliding Glass Indicator (Inner Selection Pill) ===
+    self.slidingIndicator = [[UIView alloc] initWithFrame:CGRectMake(kPadding, kPadding, kBasePillWidth, kPillHeight)];
+    self.slidingIndicator.layer.cornerRadius = kPillHeight * 0.5;
+    self.slidingIndicator.layer.cornerCurve = kCACornerCurveContinuous;
+    self.slidingIndicator.clipsToBounds = YES;
+    self.slidingIndicator.userInteractionEnabled = NO;
     
-    [self.glassSegmentContainer.contentView addSubview:self.slidingGlassPill];
+    // Inner secondary glass layer for vibrant refraction
+    UIVisualEffect *pillGlass = [self createAppleGlassEffect];
+    self.indicatorGlassView = [[UIVisualEffectView alloc] initWithEffect:pillGlass];
+    self.indicatorGlassView.frame = self.slidingIndicator.bounds;
+    self.indicatorGlassView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.indicatorGlassView.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    [self.slidingIndicator addSubview:self.indicatorGlassView];
     
-    // === Interactive Tab Buttons (on top of glass) ===
+    // Translucent specular highlight over the pill
+    self.indicatorHighlightView = [[UIView alloc] initWithFrame:self.slidingIndicator.bounds];
+    self.indicatorHighlightView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.indicatorHighlightView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.18];
+    self.indicatorHighlightView.layer.cornerRadius = kPillHeight * 0.5;
+    self.indicatorHighlightView.layer.cornerCurve = kCACornerCurveContinuous;
+    self.indicatorHighlightView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.25].CGColor;
+    self.indicatorHighlightView.layer.borderWidth = 0.5;
+    [self.slidingIndicator addSubview:self.indicatorHighlightView];
+    
+    [self.outerGlassContainer.contentView addSubview:self.slidingIndicator];
+    
+    // === 4. Tab 1: Dashboard Button & Centered Label ===
     self.dashboardTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    self.dashboardTabBtn.frame = CGRectMake(0, 0, 120, 34);
-    [self.dashboardTabBtn setTitle:@"Dashboard" forState:UIControlStateNormal];
-    [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    self.dashboardTabBtn.frame = CGRectMake(0, 0, kBarWidth * 0.5, kBarHeight);
     [self.dashboardTabBtn addTarget:self action:@selector(selectDashboard) forControlEvents:UIControlEventTouchUpInside];
-    [self.glassSegmentContainer.contentView addSubview:self.dashboardTabBtn];
+    [self.outerGlassContainer.contentView addSubview:self.dashboardTabBtn];
     
+    self.dashboardTitleLabel = [[UILabel alloc] initWithFrame:self.dashboardTabBtn.bounds];
+    self.dashboardTitleLabel.text = @"Dashboard";
+    self.dashboardTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightSemibold];
+    self.dashboardTitleLabel.textColor = [UIColor whiteColor];
+    self.dashboardTitleLabel.textAlignment = NSTextAlignmentCenter;
+    self.dashboardTitleLabel.userInteractionEnabled = NO;
+    [self.dashboardTabBtn addSubview:self.dashboardTitleLabel];
+    
+    // === 5. Tab 2: Console Button & Centered Label ===
     self.consoleTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    self.consoleTabBtn.frame = CGRectMake(120, 0, 120, 34);
-    [self.consoleTabBtn setTitle:@"Console" forState:UIControlStateNormal];
-    [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
-    self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    self.consoleTabBtn.frame = CGRectMake(kBarWidth * 0.5, 0, kBarWidth * 0.5, kBarHeight);
     [self.consoleTabBtn addTarget:self action:@selector(selectConsole) forControlEvents:UIControlEventTouchUpInside];
-    [self.glassSegmentContainer.contentView addSubview:self.consoleTabBtn];
+    [self.outerGlassContainer.contentView addSubview:self.consoleTabBtn];
     
-    self.navigationItem.titleView = self.glassSegmentContainer;
+    self.consoleTitleLabel = [[UILabel alloc] initWithFrame:self.consoleTabBtn.bounds];
+    self.consoleTitleLabel.text = @"Console";
+    self.consoleTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightMedium];
+    self.consoleTitleLabel.textColor = [UIColor colorWithWhite:0.65 alpha:1.0];
+    self.consoleTitleLabel.textAlignment = NSTextAlignmentCenter;
+    self.consoleTitleLabel.userInteractionEnabled = NO;
+    [self.consoleTabBtn addSubview:self.consoleTitleLabel];
+    
+    self.navigationItem.titleView = self.tabsRootContainer;
+}
+
+#pragma mark - Elastic Fluid Geometry
+
+- (CGRect)indicatorFrameForProgress:(CGFloat)progress {
+    CGFloat startX = kPadding;
+    CGFloat endX = (kBarWidth * 0.5) + kPadding - 1.0;
+    CGFloat currentX = startX + progress * (endX - startX);
+    
+    // Liquid stretch deformation: expands during transit, snaps on arrival
+    CGFloat stretch = sin(progress * M_PI) * 10.0;
+    CGFloat width = kBasePillWidth + stretch;
+    CGFloat centeredX = currentX - (stretch * 0.5);
+    
+    return CGRectMake(centeredX, kPadding, width, kPillHeight);
 }
 
 #pragma mark - Fullscreen Horizontal Pager
@@ -246,60 +296,80 @@
     ]];
 }
 
-#pragma mark - Scroll Synchronization with Glass Pill
+#pragma mark - Telegram-iOS Dynamic Tracking & Spring Animations
+
+- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
+    if (scrollView == self.pagingScrollView) {
+        self.isProgrammaticAnimating = NO;
+    }
+}
 
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
-    if (scrollView == self.pagingScrollView) {
+    if (scrollView == self.pagingScrollView && !self.isProgrammaticAnimating) {
         CGFloat pageWidth = self.pagingScrollView.bounds.size.width;
         if (pageWidth <= 0) return;
         
         CGFloat progress = self.pagingScrollView.contentOffset.x / pageWidth;
         progress = fmax(0.0, fmin(1.0, progress));
         
-        // Animate sliding glass pill position
-        CGFloat pillX = 3.0 + (progress * 120.0);
-        self.slidingGlassPill.frame = CGRectMake(pillX, 3.0, 114.0, 28.0);
-        
-        // Update tab text styles
-        if (progress < 0.5) {
-            [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-            self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-            [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
-            self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-        } else {
-            [self.dashboardTabBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
-            self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-            [self.consoleTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-            self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-        }
+        self.slidingIndicator.frame = [self indicatorFrameForProgress:progress];
+        [self updateTabLabelsForProgress:progress];
     }
 }
 
-- (void)selectDashboard {
+- (void)updateTabLabelsForProgress:(CGFloat)progress {
+    if (progress < 0.5) {
+        self.dashboardTitleLabel.textColor = [UIColor whiteColor];
+        self.dashboardTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightSemibold];
+        self.consoleTitleLabel.textColor = [UIColor colorWithWhite:0.65 alpha:1.0];
+        self.consoleTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightMedium];
+        self.selectedIndex = 0;
+    } else {
+        self.dashboardTitleLabel.textColor = [UIColor colorWithWhite:0.65 alpha:1.0];
+        self.dashboardTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightMedium];
+        self.consoleTitleLabel.textColor = [UIColor whiteColor];
+        self.consoleTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightSemibold];
+        self.selectedIndex = 1;
+    }
+}
+
+#pragma mark - Telegram Tap Spring Transition
+
+- (void)animateToTab:(NSInteger)index {
+    if (self.selectedIndex == index) return;
+    
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
     [haptic impactOccurred];
-    [self.pagingScrollView setContentOffset:CGPointMake(0, 0) animated:YES];
+    
+    self.isProgrammaticAnimating = YES;
+    self.selectedIndex = index;
+    
+    CGFloat targetProgress = (index == 0) ? 0.0 : 1.0;
+    CGFloat targetX = (index == 0) ? 0.0 : self.pagingScrollView.bounds.size.width;
+    CGRect targetFrame = [self indicatorFrameForProgress:targetProgress];
+    
+    // Telegram-style Spring Physics (0.45s duration, 0.76 damping, 0.8 initial velocity)
+    [UIView animateWithDuration:0.45 delay:0 usingSpringWithDamping:0.76 initialSpringVelocity:0.8 options:UIViewAnimationOptionCurveEaseInOut animations:^{
+        self.slidingIndicator.frame = targetFrame;
+        [self updateTabLabelsForProgress:targetProgress];
+        [self.pagingScrollView setContentOffset:CGPointMake(targetX, 0) animated:NO];
+    } completion:^(BOOL finished) {
+        self.isProgrammaticAnimating = NO;
+    }];
+}
+
+- (void)selectDashboard {
+    [self animateToTab:0];
 }
 
 - (void)selectConsole {
-    UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
-    [haptic impactOccurred];
-    CGFloat pageWidth = self.pagingScrollView.bounds.size.width;
-    [self.pagingScrollView setContentOffset:CGPointMake(pageWidth, 0) animated:YES];
+    [self animateToTab:1];
 }
 
 #pragma mark - TableView Data Source
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 3;
-}
-
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 3;
-    if (section == 1) return 3;
-    if (section == 2) return 3;
-    return 0;
-}
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return 3; }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (section == 0) return @"SERVICE STATUS";
@@ -309,61 +379,28 @@
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"MHAGlassCell"];
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"MHACell"];
     if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"MHAGlassCell"];
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"MHACell"];
         cell.backgroundColor = [UIColor colorWithRed:0.07 green:0.07 blue:0.09 alpha:1.0];
-        cell.layer.cornerRadius = 12;
         cell.textLabel.textColor = [UIColor whiteColor];
         cell.textLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightRegular];
         cell.detailTextLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
-    
     if (indexPath.section == 0) {
-        if (indexPath.row == 0) {
-            cell.textLabel.text = @"Daemon State";
-            cell.detailTextLabel.text = [MHAServer sharedServer].isRunning ? @"Listening" : @"Stopped";
-            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:1.0];
-        } else if (indexPath.row == 1) {
-            cell.textLabel.text = @"Listen Address";
-            cell.detailTextLabel.text = @"0.0.0.0:8080";
-            cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0];
-        } else if (indexPath.row == 2) {
-            cell.textLabel.text = @"Tunnel Type";
-            cell.detailTextLabel.text = @"USBMux TCP Bridge";
-            cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0];
-        }
+        if (indexPath.row == 0) { cell.textLabel.text = @"Daemon State"; cell.detailTextLabel.text = [MHAServer sharedServer].isRunning ? @"Listening" : @"Stopped"; cell.detailTextLabel.textColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:1.0]; }
+        else if (indexPath.row == 1) { cell.textLabel.text = @"Listen Address"; cell.detailTextLabel.text = @"0.0.0.0:8080"; cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0]; }
+        else { cell.textLabel.text = @"Tunnel Type"; cell.detailTextLabel.text = @"USBMux TCP Bridge"; cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0]; }
     } else if (indexPath.section == 1) {
-        if (indexPath.row == 0) {
-            cell.textLabel.text = @"App Data (Class 2)";
-            cell.detailTextLabel.text = @"Read / Write";
-            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.35 green:0.90 blue:0.60 alpha:1.0];
-        } else if (indexPath.row == 1) {
-            cell.textLabel.text = @"App Groups (Class 7)";
-            cell.detailTextLabel.text = @"Read / Write";
-            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.35 green:0.90 blue:0.60 alpha:1.0];
-        } else if (indexPath.row == 2) {
-            cell.textLabel.text = @"System Groups (Class 13)";
-            cell.detailTextLabel.text = @"MobileGestalt Cache";
-            cell.detailTextLabel.textColor = [UIColor colorWithRed:0.35 green:0.90 blue:0.60 alpha:1.0];
-        }
-    } else if (indexPath.section == 2) {
-        if (indexPath.row == 0) {
-            cell.textLabel.text = @"Target Hardware";
-            cell.detailTextLabel.text = self.deviceModel;
-            cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0];
-        } else if (indexPath.row == 1) {
-            cell.textLabel.text = @"Software Version";
-            cell.detailTextLabel.text = self.osVersion;
-            cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0];
-        } else if (indexPath.row == 2) {
-            cell.textLabel.text = @"Process Identifier";
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"PID %d", [[NSProcessInfo processInfo] processIdentifier]];
-            cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0];
-        }
+        if (indexPath.row == 0) { cell.textLabel.text = @"App Data (Class 2)"; cell.detailTextLabel.text = @"Read / Write"; cell.detailTextLabel.textColor = [UIColor colorWithRed:0.35 green:0.90 blue:0.60 alpha:1.0]; }
+        else if (indexPath.row == 1) { cell.textLabel.text = @"App Groups (Class 7)"; cell.detailTextLabel.text = @"Read / Write"; cell.detailTextLabel.textColor = [UIColor colorWithRed:0.35 green:0.90 blue:0.60 alpha:1.0]; }
+        else { cell.textLabel.text = @"System Groups (Class 13)"; cell.detailTextLabel.text = @"MobileGestalt Cache"; cell.detailTextLabel.textColor = [UIColor colorWithRed:0.35 green:0.90 blue:0.60 alpha:1.0]; }
+    } else {
+        if (indexPath.row == 0) { cell.textLabel.text = @"Target Hardware"; cell.detailTextLabel.text = self.deviceModel; cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0]; }
+        else if (indexPath.row == 1) { cell.textLabel.text = @"Software Version"; cell.detailTextLabel.text = self.osVersion; cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0]; }
+        else { cell.textLabel.text = @"Process Identifier"; cell.detailTextLabel.text = [NSString stringWithFormat:@"PID %d", [[NSProcessInfo processInfo] processIdentifier]]; cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0]; }
     }
-    
     return cell;
 }
 
@@ -372,30 +409,19 @@
 - (void)serverDidLogMessage:(NSString *)message isError:(BOOL)isError {
     NSDateFormatter *df = [[NSDateFormatter alloc] init];
     [df setDateFormat:@"HH:mm:ss"];
-    NSString *ts = [df stringFromDate:[NSDate date]];
-    
-    NSString *tag = isError ? @"[ERR]" : @"[INFO]";
-    NSString *line = [NSString stringWithFormat:@"%@ %@ %@", ts, tag, message];
-    
+    NSString *line = [NSString stringWithFormat:@"%@ %@ %@", [df stringFromDate:[NSDate date]], isError ? @"[ERR]" : @"[INFO]", message];
     [self.logHistory addObject:line];
-    if (self.logHistory.count > 300) {
-        [self.logHistory removeObjectAtIndex:0];
-    }
-    
+    if (self.logHistory.count > 300) [self.logHistory removeObjectAtIndex:0];
     dispatch_async(dispatch_get_main_queue(), ^{
         self.consoleTextView.text = [self.logHistory componentsJoinedByString:@"\n"];
-        if (self.consoleTextView.text.length > 0) {
-            NSRange bottom = NSMakeRange(self.consoleTextView.text.length - 1, 1);
-            [self.consoleTextView scrollRangeToVisible:bottom];
-        }
+        if (self.consoleTextView.text.length > 0)
+            [self.consoleTextView scrollRangeToVisible:NSMakeRange(self.consoleTextView.text.length - 1, 1)];
     });
 }
 
 - (void)serverClientCountDidChange:(NSUInteger)count {
     self.activeClientsCount = count;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self.dashboardTableView reloadData];
-    });
+    dispatch_async(dispatch_get_main_queue(), ^{ [self.dashboardTableView reloadData]; });
 }
 
 - (void)clearLogs {
@@ -406,7 +432,6 @@
 - (void)shareLogs {
     NSString *text = [self.logHistory componentsJoinedByString:@"\n"];
     if (text.length == 0) return;
-    
     UIActivityViewController *act = [[UIActivityViewController alloc] initWithActivityItems:@[text] applicationActivities:nil];
     [self presentViewController:act animated:YES completion:nil];
 }
