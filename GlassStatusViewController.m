@@ -6,7 +6,7 @@
 
 @interface GlassStatusViewController () <UIScrollViewDelegate>
 
-// Navigation Bar Folder Tabs (Telegram-iOS Component Style)
+// Navigation Bar Folder Tabs (Telegram Elastic Liquid Glass Component)
 @property (nonatomic, strong) UIView *tabsContainer;
 @property (nonatomic, strong) UIView *capsuleBackground;
 @property (nonatomic, strong) UIView *slidingIndicator;
@@ -20,9 +20,11 @@
 @property (nonatomic, strong) UILabel *consoleBadge;
 @property (nonatomic, strong) UIView *liveStatusDot;
 
-// Telegram isLifted transition management
+// Telegram Spring & Lifted State
 @property (nonatomic, assign) BOOL isLifted;
 @property (nonatomic, strong) NSTimer *liftTimer;
+@property (nonatomic, assign) NSInteger selectedIndex;
+@property (nonatomic, assign) BOOL isProgrammaticAnimating;
 
 // Fullscreen Page Scroll View
 @property (nonatomic, strong) UIScrollView *pagingScrollView;
@@ -42,7 +44,7 @@ static const CGFloat kTotalWidth = 250.0;
 static const CGFloat kTotalHeight = 36.0;
 static const CGFloat kBarPadding = 3.0;
 static const CGFloat kIndicatorHeight = 30.0;
-static const CGFloat kIndicatorWidth = 120.0;
+static const CGFloat kBaseIndicatorWidth = 120.0;
 
 @implementation GlassStatusViewController
 
@@ -52,6 +54,8 @@ static const CGFloat kIndicatorWidth = 120.0;
     self.view.backgroundColor = [UIColor blackColor];
     self.logHistory = [NSMutableArray array];
     self.isLifted = NO;
+    self.selectedIndex = 0;
+    self.isProgrammaticAnimating = NO;
     
     [self loadSystemInfo];
     [self setupTelegramStyleFolderNavigation];
@@ -77,7 +81,7 @@ static const CGFloat kIndicatorWidth = 120.0;
     self.activeClientsCount = 0;
 }
 
-#pragma mark - Telegram-iOS Style Folder Tabs
+#pragma mark - Apple UIGlassEffect helper
 
 - (UIVisualEffect *)createAppleGlassEffect {
     Class glassClass = NSClassFromString(@"UIGlassEffect");
@@ -87,6 +91,8 @@ static const CGFloat kIndicatorWidth = 120.0;
     }
     return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterialDark];
 }
+
+#pragma mark - Telegram-iOS Style Folder Tabs
 
 - (void)setupTelegramStyleFolderNavigation {
     if (!self.navigationController) return;
@@ -119,8 +125,8 @@ static const CGFloat kIndicatorWidth = 120.0;
     self.capsuleBackground.userInteractionEnabled = NO;
     [self.tabsContainer addSubview:self.capsuleBackground];
     
-    // === Active Sliding Indicator (Contains Liquid Glass Layer) ===
-    self.slidingIndicator = [[UIView alloc] initWithFrame:CGRectMake(kBarPadding, kBarPadding, kIndicatorWidth, kIndicatorHeight)];
+    // === Sliding Liquid Indicator ===
+    self.slidingIndicator = [[UIView alloc] initWithFrame:CGRectMake(kBarPadding, kBarPadding, kBaseIndicatorWidth, kIndicatorHeight)];
     self.slidingIndicator.layer.cornerRadius = kIndicatorHeight * 0.5;
     self.slidingIndicator.layer.cornerCurve = kCACornerCurveContinuous;
     self.slidingIndicator.clipsToBounds = YES;
@@ -137,7 +143,7 @@ static const CGFloat kIndicatorWidth = 120.0;
     self.glassLensEffectView.alpha = 0.0;
     [self.slidingIndicator addSubview:self.glassLensEffectView];
     
-    // 2. Resting Highlight Fill
+    // 2. Resting Highlight Layer
     self.restingHighlightView = [[UIView alloc] initWithFrame:self.slidingIndicator.bounds];
     self.restingHighlightView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     self.restingHighlightView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.16];
@@ -155,7 +161,6 @@ static const CGFloat kIndicatorWidth = 120.0;
     [self.dashboardTabBtn addTarget:self action:@selector(selectDashboard) forControlEvents:UIControlEventTouchUpInside];
     [self.tabsContainer addSubview:self.dashboardTabBtn];
     
-    // Green Status Dot
     self.liveStatusDot = [[UIView alloc] initWithFrame:CGRectMake(14, 15, 6, 6)];
     self.liveStatusDot.backgroundColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:1.0];
     self.liveStatusDot.layer.cornerRadius = 3;
@@ -188,7 +193,6 @@ static const CGFloat kIndicatorWidth = 120.0;
     self.consoleTitleLabel.userInteractionEnabled = NO;
     [self.consoleTabBtn addSubview:self.consoleTitleLabel];
     
-    // Telegram Style Capsule Badge
     self.consoleBadge = [[UILabel alloc] initWithFrame:CGRectMake(78, 9, 24, 18)];
     self.consoleBadge.text = @"0";
     self.consoleBadge.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightSemibold];
@@ -203,7 +207,7 @@ static const CGFloat kIndicatorWidth = 120.0;
     self.navigationItem.titleView = self.tabsContainer;
 }
 
-#pragma mark - Telegram-iOS Lifted State Transition
+#pragma mark - Telegram-iOS Lift & Fluid Physics
 
 - (void)setLifted:(BOOL)lifted animated:(BOOL)animated {
     if (self.isLifted == lifted) return;
@@ -211,27 +215,39 @@ static const CGFloat kIndicatorWidth = 120.0;
     
     void (^animations)(void) = ^{
         if (lifted) {
-            // When user swipes/transitions: morph into liquid glass lens
             self.glassLensEffectView.alpha = 1.0;
             self.restingHighlightView.alpha = 0.0;
             self.capsuleBackground.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.40];
-            self.capsuleBackground.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
-            self.slidingIndicator.transform = CGAffineTransformMakeScale(1.03, 1.03);
+            self.capsuleBackground.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.22].CGColor;
         } else {
-            // Resting state: settle into clean resting highlight
             self.glassLensEffectView.alpha = 0.0;
             self.restingHighlightView.alpha = 1.0;
             self.capsuleBackground.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.75];
             self.capsuleBackground.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.12].CGColor;
-            self.slidingIndicator.transform = CGAffineTransformIdentity;
         }
     };
     
     if (animated) {
-        [UIView animateWithDuration:0.25 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:animations completion:nil];
+        [UIView animateWithDuration:0.3 delay:0 usingSpringWithDamping:0.85 initialSpringVelocity:0.5 options:UIViewAnimationOptionCurveEaseInOut animations:animations completion:nil];
     } else {
         animations();
     }
+}
+
+#pragma mark - Elastic Pill Frame Calculation
+
+- (CGRect)indicatorFrameForProgress:(CGFloat)progress {
+    CGFloat startX = kBarPadding;
+    CGFloat endX = (kTotalWidth * 0.5) + kBarPadding - 3.0;
+    CGFloat currentX = startX + progress * (endX - startX);
+    
+    // Telegram elastic stretch: pill slightly expands width during transit
+    // Peak stretch at progress = 0.5 (sin(progress * pi))
+    CGFloat stretch = sin(progress * M_PI) * 10.0;
+    CGFloat width = kBaseIndicatorWidth + stretch;
+    CGFloat centeredX = currentX - (stretch * 0.5);
+    
+    return CGRectMake(centeredX, kBarPadding, width, kIndicatorHeight);
 }
 
 #pragma mark - Fullscreen Horizontal Pager
@@ -336,10 +352,11 @@ static const CGFloat kIndicatorWidth = 120.0;
     ]];
 }
 
-#pragma mark - Telegram-iOS Scroll Synchronization & Dynamic Tracking
+#pragma mark - Telegram-iOS Spring Tab Switching & Scroll Tracking
 
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
     if (scrollView == self.pagingScrollView) {
+        self.isProgrammaticAnimating = NO;
         [self.liftTimer invalidate];
         self.liftTimer = nil;
         [self setLifted:YES animated:YES];
@@ -347,42 +364,35 @@ static const CGFloat kIndicatorWidth = 120.0;
 }
 
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
-    if (scrollView == self.pagingScrollView) {
+    if (scrollView == self.pagingScrollView && !self.isProgrammaticAnimating) {
         CGFloat pageWidth = self.pagingScrollView.bounds.size.width;
         if (pageWidth <= 0) return;
         
         CGFloat progress = self.pagingScrollView.contentOffset.x / pageWidth;
         progress = fmax(0.0, fmin(1.0, progress));
         
-        // Exact Telegram interpolation between tab centers
-        CGFloat startX = kBarPadding;
-        CGFloat endX = (kTotalWidth * 0.5) + kBarPadding - 3.0;
-        CGFloat currentX = startX + progress * (endX - startX);
-        
-        self.slidingIndicator.frame = CGRectMake(currentX, kBarPadding, kIndicatorWidth, kIndicatorHeight);
-        
-        // Dynamic label colors and weights
-        if (progress < 0.5) {
-            self.dashboardTitleLabel.textColor = [UIColor whiteColor];
-            self.dashboardTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightSemibold];
-            self.consoleTitleLabel.textColor = [UIColor colorWithWhite:0.60 alpha:1.0];
-            self.consoleTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightMedium];
-        } else {
-            self.dashboardTitleLabel.textColor = [UIColor colorWithWhite:0.60 alpha:1.0];
-            self.dashboardTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightMedium];
-            self.consoleTitleLabel.textColor = [UIColor whiteColor];
-            self.consoleTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightSemibold];
-        }
+        self.slidingIndicator.frame = [self indicatorFrameForProgress:progress];
+        [self updateTabLabelsForProgress:progress];
+    }
+}
+
+- (void)updateTabLabelsForProgress:(CGFloat)progress {
+    if (progress < 0.5) {
+        self.dashboardTitleLabel.textColor = [UIColor whiteColor];
+        self.dashboardTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightSemibold];
+        self.consoleTitleLabel.textColor = [UIColor colorWithWhite:0.60 alpha:1.0];
+        self.consoleTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightMedium];
+        self.selectedIndex = 0;
+    } else {
+        self.dashboardTitleLabel.textColor = [UIColor colorWithWhite:0.60 alpha:1.0];
+        self.dashboardTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightMedium];
+        self.consoleTitleLabel.textColor = [UIColor whiteColor];
+        self.consoleTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightSemibold];
+        self.selectedIndex = 1;
     }
 }
 
 - (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
-    if (scrollView == self.pagingScrollView) {
-        [self scheduleLiftEnd];
-    }
-}
-
-- (void)scrollViewDidEndScrollingAnimation:(UIScrollView *)scrollView {
     if (scrollView == self.pagingScrollView) {
         [self scheduleLiftEnd];
     }
@@ -395,19 +405,39 @@ static const CGFloat kIndicatorWidth = 120.0;
     }];
 }
 
-- (void)selectDashboard {
+#pragma mark - Telegram Tap Spring Animation
+
+- (void)animateToTab:(NSInteger)index {
+    if (self.selectedIndex == index && !self.isLifted) return;
+    
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
     [haptic impactOccurred];
+    
+    self.isProgrammaticAnimating = YES;
+    self.selectedIndex = index;
     [self setLifted:YES animated:YES];
-    [self.pagingScrollView setContentOffset:CGPointMake(0, 0) animated:YES];
+    
+    CGFloat targetProgress = (index == 0) ? 0.0 : 1.0;
+    CGFloat targetX = (index == 0) ? 0.0 : self.pagingScrollView.bounds.size.width;
+    CGRect targetFrame = [self indicatorFrameForProgress:targetProgress];
+    
+    // Telegram-style Spring Animation (Duration: 0.45s, Damping: 0.76, InitialVelocity: 0.8)
+    [UIView animateWithDuration:0.45 delay:0 usingSpringWithDamping:0.76 initialSpringVelocity:0.8 options:UIViewAnimationOptionCurveEaseInOut animations:^{
+        self.slidingIndicator.frame = targetFrame;
+        [self updateTabLabelsForProgress:targetProgress];
+        [self.pagingScrollView setContentOffset:CGPointMake(targetX, 0) animated:NO];
+    } completion:^(BOOL finished) {
+        self.isProgrammaticAnimating = NO;
+        [self scheduleLiftEnd];
+    }];
+}
+
+- (void)selectDashboard {
+    [self animateToTab:0];
 }
 
 - (void)selectConsole {
-    UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
-    [haptic impactOccurred];
-    [self setLifted:YES animated:YES];
-    CGFloat pageWidth = self.pagingScrollView.bounds.size.width;
-    [self.pagingScrollView setContentOffset:CGPointMake(pageWidth, 0) animated:YES];
+    [self animateToTab:1];
 }
 
 #pragma mark - TableView Data Source
