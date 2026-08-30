@@ -6,12 +6,12 @@
 
 @interface GlassStatusViewController () <UIScrollViewDelegate>
 
-// Navigation Bar Folder Tabs (Telegram Elastic Liquid Glass Component)
-@property (nonatomic, strong) UIView *tabsContainer;
-@property (nonatomic, strong) UIView *capsuleBackground;
+// Telegram-iOS Floating Liquid Glass Bar Architecture
+@property (nonatomic, strong) UIView *tabsRootContainer;
+@property (nonatomic, strong) UIVisualEffectView *outerGlassContainer;
 @property (nonatomic, strong) UIView *slidingIndicator;
-@property (nonatomic, strong) UIVisualEffectView *glassLensEffectView;
-@property (nonatomic, strong) UIView *restingHighlightView;
+@property (nonatomic, strong) UIVisualEffectView *indicatorGlassView;
+@property (nonatomic, strong) UIView *indicatorHighlightView;
 
 @property (nonatomic, strong) UIButton *dashboardTabBtn;
 @property (nonatomic, strong) UIButton *consoleTabBtn;
@@ -20,9 +20,7 @@
 @property (nonatomic, strong) UILabel *consoleBadge;
 @property (nonatomic, strong) UIView *liveStatusDot;
 
-// Telegram Spring & Lifted State
-@property (nonatomic, assign) BOOL isLifted;
-@property (nonatomic, strong) NSTimer *liftTimer;
+// Telegram Spring & State Management
 @property (nonatomic, assign) NSInteger selectedIndex;
 @property (nonatomic, assign) BOOL isProgrammaticAnimating;
 
@@ -40,11 +38,11 @@
 
 @end
 
-static const CGFloat kTotalWidth = 250.0;
-static const CGFloat kTotalHeight = 36.0;
-static const CGFloat kBarPadding = 3.0;
-static const CGFloat kIndicatorHeight = 30.0;
-static const CGFloat kBaseIndicatorWidth = 120.0;
+static const CGFloat kBarWidth = 250.0;
+static const CGFloat kBarHeight = 36.0;
+static const CGFloat kPadding = 3.0;
+static const CGFloat kPillHeight = 30.0;
+static const CGFloat kBasePillWidth = 120.0;
 
 @implementation GlassStatusViewController
 
@@ -53,12 +51,11 @@ static const CGFloat kBaseIndicatorWidth = 120.0;
     
     self.view.backgroundColor = [UIColor blackColor];
     self.logHistory = [NSMutableArray array];
-    self.isLifted = NO;
     self.selectedIndex = 0;
     self.isProgrammaticAnimating = NO;
     
     [self loadSystemInfo];
-    [self setupTelegramStyleFolderNavigation];
+    [self setupTelegramLiquidGlassNavigationBar];
     [self setupFullscreenPaging];
     
     [MHAServer sharedServer].delegate = self;
@@ -81,7 +78,7 @@ static const CGFloat kBaseIndicatorWidth = 120.0;
     self.activeClientsCount = 0;
 }
 
-#pragma mark - Apple UIGlassEffect helper
+#pragma mark - Apple UIGlassEffect Factory
 
 - (UIVisualEffect *)createAppleGlassEffect {
     Class glassClass = NSClassFromString(@"UIGlassEffect");
@@ -92,9 +89,9 @@ static const CGFloat kBaseIndicatorWidth = 120.0;
     return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterialDark];
 }
 
-#pragma mark - Telegram-iOS Style Folder Tabs
+#pragma mark - Telegram-iOS Native Liquid Glass Navigation Bar
 
-- (void)setupTelegramStyleFolderNavigation {
+- (void)setupTelegramLiquidGlassNavigationBar {
     if (!self.navigationController) return;
     
     self.navigationController.navigationBar.prefersLargeTitles = NO;
@@ -110,68 +107,67 @@ static const CGFloat kBaseIndicatorWidth = 120.0;
     UIBarButtonItem *shareItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(shareLogs)];
     self.navigationItem.rightBarButtonItem = shareItem;
     
-    // === Outer Tabs Frame (250 x 36) ===
-    self.tabsContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kTotalWidth, kTotalHeight)];
-    self.tabsContainer.backgroundColor = [UIColor clearColor];
+    // === 1. Root Container for Navigation Bar ===
+    self.tabsRootContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kBarWidth, kBarHeight)];
+    self.tabsRootContainer.backgroundColor = [UIColor clearColor];
     
-    // === Capsule Bar Background ===
-    self.capsuleBackground = [[UIView alloc] initWithFrame:self.tabsContainer.bounds];
-    self.capsuleBackground.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.75];
-    self.capsuleBackground.layer.cornerRadius = kTotalHeight * 0.5;
-    self.capsuleBackground.layer.cornerCurve = kCACornerCurveContinuous;
-    self.capsuleBackground.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.12].CGColor;
-    self.capsuleBackground.layer.borderWidth = 0.5;
-    self.capsuleBackground.clipsToBounds = YES;
-    self.capsuleBackground.userInteractionEnabled = NO;
-    [self.tabsContainer addSubview:self.capsuleBackground];
+    // === 2. Outer Liquid Glass Bar (Telegram GlassBackgroundView on iOS 26) ===
+    UIVisualEffect *outerGlass = [self createAppleGlassEffect];
+    self.outerGlassContainer = [[UIVisualEffectView alloc] initWithEffect:outerGlass];
+    self.outerGlassContainer.frame = self.tabsRootContainer.bounds;
+    self.outerGlassContainer.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    self.outerGlassContainer.layer.cornerRadius = kBarHeight * 0.5;
+    self.outerGlassContainer.layer.cornerCurve = kCACornerCurveContinuous;
+    self.outerGlassContainer.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.15].CGColor;
+    self.outerGlassContainer.layer.borderWidth = 0.5;
+    self.outerGlassContainer.clipsToBounds = YES;
+    [self.tabsRootContainer addSubview:self.outerGlassContainer];
     
-    // === Sliding Liquid Indicator ===
-    self.slidingIndicator = [[UIView alloc] initWithFrame:CGRectMake(kBarPadding, kBarPadding, kBaseIndicatorWidth, kIndicatorHeight)];
-    self.slidingIndicator.layer.cornerRadius = kIndicatorHeight * 0.5;
+    // === 3. Active Sliding Glass Indicator (Inner Selection Pill) ===
+    self.slidingIndicator = [[UIView alloc] initWithFrame:CGRectMake(kPadding, kPadding, kBasePillWidth, kPillHeight)];
+    self.slidingIndicator.layer.cornerRadius = kPillHeight * 0.5;
     self.slidingIndicator.layer.cornerCurve = kCACornerCurveContinuous;
     self.slidingIndicator.clipsToBounds = YES;
     self.slidingIndicator.userInteractionEnabled = NO;
     
-    // 1. Dynamic Liquid Glass Lens (Apple UIGlassEffect)
-    UIVisualEffect *glassEffect = [self createAppleGlassEffect];
-    self.glassLensEffectView = [[UIVisualEffectView alloc] initWithEffect:glassEffect];
-    self.glassLensEffectView.frame = self.slidingIndicator.bounds;
-    self.glassLensEffectView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.glassLensEffectView.layer.cornerRadius = kIndicatorHeight * 0.5;
-    self.glassLensEffectView.layer.cornerCurve = kCACornerCurveContinuous;
-    self.glassLensEffectView.clipsToBounds = YES;
-    self.glassLensEffectView.alpha = 0.0;
-    [self.slidingIndicator addSubview:self.glassLensEffectView];
+    // Inner secondary glass layer for vibrant refraction
+    UIVisualEffect *pillGlass = [self createAppleGlassEffect];
+    self.indicatorGlassView = [[UIVisualEffectView alloc] initWithEffect:pillGlass];
+    self.indicatorGlassView.frame = self.slidingIndicator.bounds;
+    self.indicatorGlassView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.indicatorGlassView.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    [self.slidingIndicator addSubview:self.indicatorGlassView];
     
-    // 2. Resting Highlight Layer
-    self.restingHighlightView = [[UIView alloc] initWithFrame:self.slidingIndicator.bounds];
-    self.restingHighlightView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.restingHighlightView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.16];
-    self.restingHighlightView.layer.cornerRadius = kIndicatorHeight * 0.5;
-    self.restingHighlightView.layer.cornerCurve = kCACornerCurveContinuous;
-    self.restingHighlightView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
-    self.restingHighlightView.layer.borderWidth = 0.5;
-    [self.slidingIndicator addSubview:self.restingHighlightView];
+    // Translucent specular highlight over the pill
+    self.indicatorHighlightView = [[UIView alloc] initWithFrame:self.slidingIndicator.bounds];
+    self.indicatorHighlightView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.indicatorHighlightView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.18];
+    self.indicatorHighlightView.layer.cornerRadius = kPillHeight * 0.5;
+    self.indicatorHighlightView.layer.cornerCurve = kCACornerCurveContinuous;
+    self.indicatorHighlightView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.25].CGColor;
+    self.indicatorHighlightView.layer.borderWidth = 0.5;
+    [self.slidingIndicator addSubview:self.indicatorHighlightView];
     
-    [self.tabsContainer addSubview:self.slidingIndicator];
+    [self.outerGlassContainer.contentView addSubview:self.slidingIndicator];
     
-    // === Tab 1: Dashboard Button & Label ===
+    // === 4. Tab 1: Dashboard Button & Label ===
     self.dashboardTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    self.dashboardTabBtn.frame = CGRectMake(0, 0, kTotalWidth * 0.5, kTotalHeight);
+    self.dashboardTabBtn.frame = CGRectMake(0, 0, kBarWidth * 0.5, kBarHeight);
     [self.dashboardTabBtn addTarget:self action:@selector(selectDashboard) forControlEvents:UIControlEventTouchUpInside];
-    [self.tabsContainer addSubview:self.dashboardTabBtn];
+    [self.outerGlassContainer.contentView addSubview:self.dashboardTabBtn];
     
+    // Emerald Pulse Live Dot
     self.liveStatusDot = [[UIView alloc] initWithFrame:CGRectMake(14, 15, 6, 6)];
     self.liveStatusDot.backgroundColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:1.0];
     self.liveStatusDot.layer.cornerRadius = 3;
-    self.liveStatusDot.layer.shadowColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:0.8].CGColor;
+    self.liveStatusDot.layer.shadowColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:0.9].CGColor;
     self.liveStatusDot.layer.shadowOffset = CGSizeZero;
     self.liveStatusDot.layer.shadowRadius = 3.0;
-    self.liveStatusDot.layer.shadowOpacity = 0.8;
+    self.liveStatusDot.layer.shadowOpacity = 0.9;
     self.liveStatusDot.userInteractionEnabled = NO;
     [self.dashboardTabBtn addSubview:self.liveStatusDot];
     
-    self.dashboardTitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(26, 0, (kTotalWidth * 0.5) - 30, kTotalHeight)];
+    self.dashboardTitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(26, 0, (kBarWidth * 0.5) - 30, kBarHeight)];
     self.dashboardTitleLabel.text = @"Dashboard";
     self.dashboardTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightSemibold];
     self.dashboardTitleLabel.textColor = [UIColor whiteColor];
@@ -179,20 +175,21 @@ static const CGFloat kBaseIndicatorWidth = 120.0;
     self.dashboardTitleLabel.userInteractionEnabled = NO;
     [self.dashboardTabBtn addSubview:self.dashboardTitleLabel];
     
-    // === Tab 2: Console Button, Label & Telegram Badge ===
+    // === 5. Tab 2: Console Button, Label & Telegram Capsule Badge ===
     self.consoleTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    self.consoleTabBtn.frame = CGRectMake(kTotalWidth * 0.5, 0, kTotalWidth * 0.5, kTotalHeight);
+    self.consoleTabBtn.frame = CGRectMake(kBarWidth * 0.5, 0, kBarWidth * 0.5, kBarHeight);
     [self.consoleTabBtn addTarget:self action:@selector(selectConsole) forControlEvents:UIControlEventTouchUpInside];
-    [self.tabsContainer addSubview:self.consoleTabBtn];
+    [self.outerGlassContainer.contentView addSubview:self.consoleTabBtn];
     
-    self.consoleTitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 0, 60, kTotalHeight)];
+    self.consoleTitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 0, 60, kBarHeight)];
     self.consoleTitleLabel.text = @"Console";
     self.consoleTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightMedium];
-    self.consoleTitleLabel.textColor = [UIColor colorWithWhite:0.60 alpha:1.0];
+    self.consoleTitleLabel.textColor = [UIColor colorWithWhite:0.65 alpha:1.0];
     self.consoleTitleLabel.textAlignment = NSTextAlignmentLeft;
     self.consoleTitleLabel.userInteractionEnabled = NO;
     [self.consoleTabBtn addSubview:self.consoleTitleLabel];
     
+    // Telegram Style Accent Badge
     self.consoleBadge = [[UILabel alloc] initWithFrame:CGRectMake(78, 9, 24, 18)];
     self.consoleBadge.text = @"0";
     self.consoleBadge.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightSemibold];
@@ -204,50 +201,22 @@ static const CGFloat kBaseIndicatorWidth = 120.0;
     self.consoleBadge.userInteractionEnabled = NO;
     [self.consoleTabBtn addSubview:self.consoleBadge];
     
-    self.navigationItem.titleView = self.tabsContainer;
+    self.navigationItem.titleView = self.tabsRootContainer;
 }
 
-#pragma mark - Telegram-iOS Lift & Fluid Physics
-
-- (void)setLifted:(BOOL)lifted animated:(BOOL)animated {
-    if (self.isLifted == lifted) return;
-    self.isLifted = lifted;
-    
-    void (^animations)(void) = ^{
-        if (lifted) {
-            self.glassLensEffectView.alpha = 1.0;
-            self.restingHighlightView.alpha = 0.0;
-            self.capsuleBackground.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.40];
-            self.capsuleBackground.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.22].CGColor;
-        } else {
-            self.glassLensEffectView.alpha = 0.0;
-            self.restingHighlightView.alpha = 1.0;
-            self.capsuleBackground.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.75];
-            self.capsuleBackground.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.12].CGColor;
-        }
-    };
-    
-    if (animated) {
-        [UIView animateWithDuration:0.3 delay:0 usingSpringWithDamping:0.85 initialSpringVelocity:0.5 options:UIViewAnimationOptionCurveEaseInOut animations:animations completion:nil];
-    } else {
-        animations();
-    }
-}
-
-#pragma mark - Elastic Pill Frame Calculation
+#pragma mark - Elastic Fluid Geometry
 
 - (CGRect)indicatorFrameForProgress:(CGFloat)progress {
-    CGFloat startX = kBarPadding;
-    CGFloat endX = (kTotalWidth * 0.5) + kBarPadding - 3.0;
+    CGFloat startX = kPadding;
+    CGFloat endX = (kBarWidth * 0.5) + kPadding - 3.0;
     CGFloat currentX = startX + progress * (endX - startX);
     
-    // Telegram elastic stretch: pill slightly expands width during transit
-    // Peak stretch at progress = 0.5 (sin(progress * pi))
-    CGFloat stretch = sin(progress * M_PI) * 10.0;
-    CGFloat width = kBaseIndicatorWidth + stretch;
+    // Liquid stretch deformation: expands during transit, snaps on arrival
+    CGFloat stretch = sin(progress * M_PI) * 12.0;
+    CGFloat width = kBasePillWidth + stretch;
     CGFloat centeredX = currentX - (stretch * 0.5);
     
-    return CGRectMake(centeredX, kBarPadding, width, kIndicatorHeight);
+    return CGRectMake(centeredX, kPadding, width, kPillHeight);
 }
 
 #pragma mark - Fullscreen Horizontal Pager
@@ -352,14 +321,11 @@ static const CGFloat kBaseIndicatorWidth = 120.0;
     ]];
 }
 
-#pragma mark - Telegram-iOS Spring Tab Switching & Scroll Tracking
+#pragma mark - Telegram-iOS Dynamic Tracking & Spring Animations
 
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
     if (scrollView == self.pagingScrollView) {
         self.isProgrammaticAnimating = NO;
-        [self.liftTimer invalidate];
-        self.liftTimer = nil;
-        [self setLifted:YES animated:YES];
     }
 }
 
@@ -380,11 +346,11 @@ static const CGFloat kBaseIndicatorWidth = 120.0;
     if (progress < 0.5) {
         self.dashboardTitleLabel.textColor = [UIColor whiteColor];
         self.dashboardTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightSemibold];
-        self.consoleTitleLabel.textColor = [UIColor colorWithWhite:0.60 alpha:1.0];
+        self.consoleTitleLabel.textColor = [UIColor colorWithWhite:0.65 alpha:1.0];
         self.consoleTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightMedium];
         self.selectedIndex = 0;
     } else {
-        self.dashboardTitleLabel.textColor = [UIColor colorWithWhite:0.60 alpha:1.0];
+        self.dashboardTitleLabel.textColor = [UIColor colorWithWhite:0.65 alpha:1.0];
         self.dashboardTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightMedium];
         self.consoleTitleLabel.textColor = [UIColor whiteColor];
         self.consoleTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightSemibold];
@@ -392,43 +358,28 @@ static const CGFloat kBaseIndicatorWidth = 120.0;
     }
 }
 
-- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
-    if (scrollView == self.pagingScrollView) {
-        [self scheduleLiftEnd];
-    }
-}
-
-- (void)scheduleLiftEnd {
-    [self.liftTimer invalidate];
-    self.liftTimer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:NO block:^(NSTimer * _Nonnull timer) {
-        [self setLifted:NO animated:YES];
-    }];
-}
-
-#pragma mark - Telegram Tap Spring Animation
+#pragma mark - Telegram Tap Spring Transition
 
 - (void)animateToTab:(NSInteger)index {
-    if (self.selectedIndex == index && !self.isLifted) return;
+    if (self.selectedIndex == index) return;
     
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
     [haptic impactOccurred];
     
     self.isProgrammaticAnimating = YES;
     self.selectedIndex = index;
-    [self setLifted:YES animated:YES];
     
     CGFloat targetProgress = (index == 0) ? 0.0 : 1.0;
     CGFloat targetX = (index == 0) ? 0.0 : self.pagingScrollView.bounds.size.width;
     CGRect targetFrame = [self indicatorFrameForProgress:targetProgress];
     
-    // Telegram-style Spring Animation (Duration: 0.45s, Damping: 0.76, InitialVelocity: 0.8)
+    // Telegram-style Spring Physics (0.45s duration, 0.76 damping, 0.8 initial velocity)
     [UIView animateWithDuration:0.45 delay:0 usingSpringWithDamping:0.76 initialSpringVelocity:0.8 options:UIViewAnimationOptionCurveEaseInOut animations:^{
         self.slidingIndicator.frame = targetFrame;
         [self updateTabLabelsForProgress:targetProgress];
         [self.pagingScrollView setContentOffset:CGPointMake(targetX, 0) animated:NO];
     } completion:^(BOOL finished) {
         self.isProgrammaticAnimating = NO;
-        [self scheduleLiftEnd];
     }];
 }
 
