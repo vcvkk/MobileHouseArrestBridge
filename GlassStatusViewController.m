@@ -6,19 +6,18 @@
 
 @interface GlassStatusViewController () <UIScrollViewDelegate>
 
-// Telegram-iOS Floating Liquid Glass Bar Architecture
+// Navigation Bar Folder Tabs (Clean Telegram-iOS Liquid Glass Style)
 @property (nonatomic, strong) UIView *tabsRootContainer;
 @property (nonatomic, strong) UIVisualEffectView *outerGlassContainer;
 @property (nonatomic, strong) UIView *slidingIndicator;
 @property (nonatomic, strong) UIVisualEffectView *indicatorGlassView;
-@property (nonatomic, strong) UIView *indicatorHighlightView;
+@property (nonatomic, strong) CAGradientLayer *specularGlassHighlight;
+@property (nonatomic, strong) UIView *pillTintOverlay;
 
 @property (nonatomic, strong) UIButton *dashboardTabBtn;
 @property (nonatomic, strong) UIButton *consoleTabBtn;
 @property (nonatomic, strong) UILabel *dashboardTitleLabel;
 @property (nonatomic, strong) UILabel *consoleTitleLabel;
-@property (nonatomic, strong) UILabel *consoleBadge;
-@property (nonatomic, strong) UIView *liveStatusDot;
 
 // Telegram Spring & State Management
 @property (nonatomic, assign) NSInteger selectedIndex;
@@ -38,11 +37,11 @@
 
 @end
 
-static const CGFloat kBarWidth = 250.0;
+static const CGFloat kBarWidth = 240.0;
 static const CGFloat kBarHeight = 36.0;
 static const CGFloat kPadding = 3.0;
 static const CGFloat kPillHeight = 30.0;
-static const CGFloat kBasePillWidth = 120.0;
+static const CGFloat kBasePillWidth = 117.0; // (240 - 2*3) / 2 = 117
 
 @implementation GlassStatusViewController
 
@@ -118,19 +117,19 @@ static const CGFloat kBasePillWidth = 120.0;
     self.outerGlassContainer.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     self.outerGlassContainer.layer.cornerRadius = kBarHeight * 0.5;
     self.outerGlassContainer.layer.cornerCurve = kCACornerCurveContinuous;
-    self.outerGlassContainer.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.15].CGColor;
+    self.outerGlassContainer.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.14].CGColor;
     self.outerGlassContainer.layer.borderWidth = 0.5;
     self.outerGlassContainer.clipsToBounds = YES;
     [self.tabsRootContainer addSubview:self.outerGlassContainer];
     
-    // === 3. Active Sliding Glass Indicator (Inner Selection Pill) ===
+    // === 3. Active Sliding Glass Indicator (Liquid Lens with Refraction) ===
     self.slidingIndicator = [[UIView alloc] initWithFrame:CGRectMake(kPadding, kPadding, kBasePillWidth, kPillHeight)];
     self.slidingIndicator.layer.cornerRadius = kPillHeight * 0.5;
     self.slidingIndicator.layer.cornerCurve = kCACornerCurveContinuous;
     self.slidingIndicator.clipsToBounds = YES;
     self.slidingIndicator.userInteractionEnabled = NO;
     
-    // Inner secondary glass layer for vibrant refraction
+    // Apple UIGlassEffect layer
     UIVisualEffect *pillGlass = [self createAppleGlassEffect];
     self.indicatorGlassView = [[UIVisualEffectView alloc] initWithEffect:pillGlass];
     self.indicatorGlassView.frame = self.slidingIndicator.bounds;
@@ -138,85 +137,83 @@ static const CGFloat kBasePillWidth = 120.0;
     self.indicatorGlassView.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     [self.slidingIndicator addSubview:self.indicatorGlassView];
     
-    // Translucent specular highlight over the pill
-    self.indicatorHighlightView = [[UIView alloc] initWithFrame:self.slidingIndicator.bounds];
-    self.indicatorHighlightView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.indicatorHighlightView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.18];
-    self.indicatorHighlightView.layer.cornerRadius = kPillHeight * 0.5;
-    self.indicatorHighlightView.layer.cornerCurve = kCACornerCurveContinuous;
-    self.indicatorHighlightView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.25].CGColor;
-    self.indicatorHighlightView.layer.borderWidth = 0.5;
-    [self.slidingIndicator addSubview:self.indicatorHighlightView];
+    // Specular Reflection Gradient (Liquid Glass Surface Sheen)
+    self.specularGlassHighlight = [CAGradientLayer layer];
+    self.specularGlassHighlight.frame = self.slidingIndicator.bounds;
+    self.specularGlassHighlight.colors = @[
+        (id)[UIColor colorWithWhite:1.0 alpha:0.28].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.06].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.12].CGColor
+    ];
+    self.specularGlassHighlight.locations = @[@0.0, @0.5, @1.0];
+    self.specularGlassHighlight.startPoint = CGPointMake(0.5, 0.0);
+    self.specularGlassHighlight.endPoint = CGPointMake(0.5, 1.0);
+    self.specularGlassHighlight.cornerRadius = kPillHeight * 0.5;
+    [self.slidingIndicator.layer addSublayer:self.specularGlassHighlight];
+    
+    // Subtle Tint Overlay
+    self.pillTintOverlay = [[UIView alloc] initWithFrame:self.slidingIndicator.bounds];
+    self.pillTintOverlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.pillTintOverlay.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.12];
+    self.pillTintOverlay.layer.cornerRadius = kPillHeight * 0.5;
+    self.pillTintOverlay.layer.cornerCurve = kCACornerCurveContinuous;
+    self.pillTintOverlay.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.25].CGColor;
+    self.pillTintOverlay.layer.borderWidth = 0.5;
+    [self.slidingIndicator addSubview:self.pillTintOverlay];
     
     [self.outerGlassContainer.contentView addSubview:self.slidingIndicator];
     
-    // === 4. Tab 1: Dashboard Button & Label ===
+    // === 4. Clean Centered Tab 1: Dashboard ===
     self.dashboardTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     self.dashboardTabBtn.frame = CGRectMake(0, 0, kBarWidth * 0.5, kBarHeight);
     [self.dashboardTabBtn addTarget:self action:@selector(selectDashboard) forControlEvents:UIControlEventTouchUpInside];
     [self.outerGlassContainer.contentView addSubview:self.dashboardTabBtn];
     
-    // Emerald Pulse Live Dot
-    self.liveStatusDot = [[UIView alloc] initWithFrame:CGRectMake(14, 15, 6, 6)];
-    self.liveStatusDot.backgroundColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:1.0];
-    self.liveStatusDot.layer.cornerRadius = 3;
-    self.liveStatusDot.layer.shadowColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:0.9].CGColor;
-    self.liveStatusDot.layer.shadowOffset = CGSizeZero;
-    self.liveStatusDot.layer.shadowRadius = 3.0;
-    self.liveStatusDot.layer.shadowOpacity = 0.9;
-    self.liveStatusDot.userInteractionEnabled = NO;
-    [self.dashboardTabBtn addSubview:self.liveStatusDot];
-    
-    self.dashboardTitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(26, 0, (kBarWidth * 0.5) - 30, kBarHeight)];
+    self.dashboardTitleLabel = [[UILabel alloc] initWithFrame:self.dashboardTabBtn.bounds];
     self.dashboardTitleLabel.text = @"Dashboard";
     self.dashboardTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightSemibold];
     self.dashboardTitleLabel.textColor = [UIColor whiteColor];
-    self.dashboardTitleLabel.textAlignment = NSTextAlignmentLeft;
+    self.dashboardTitleLabel.textAlignment = NSTextAlignmentCenter;
     self.dashboardTitleLabel.userInteractionEnabled = NO;
     [self.dashboardTabBtn addSubview:self.dashboardTitleLabel];
     
-    // === 5. Tab 2: Console Button, Label & Telegram Capsule Badge ===
+    // === 5. Clean Centered Tab 2: Console ===
     self.consoleTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     self.consoleTabBtn.frame = CGRectMake(kBarWidth * 0.5, 0, kBarWidth * 0.5, kBarHeight);
     [self.consoleTabBtn addTarget:self action:@selector(selectConsole) forControlEvents:UIControlEventTouchUpInside];
     [self.outerGlassContainer.contentView addSubview:self.consoleTabBtn];
     
-    self.consoleTitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 0, 60, kBarHeight)];
+    self.consoleTitleLabel = [[UILabel alloc] initWithFrame:self.consoleTabBtn.bounds];
     self.consoleTitleLabel.text = @"Console";
     self.consoleTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightMedium];
     self.consoleTitleLabel.textColor = [UIColor colorWithWhite:0.65 alpha:1.0];
-    self.consoleTitleLabel.textAlignment = NSTextAlignmentLeft;
+    self.consoleTitleLabel.textAlignment = NSTextAlignmentCenter;
     self.consoleTitleLabel.userInteractionEnabled = NO;
     [self.consoleTabBtn addSubview:self.consoleTitleLabel];
-    
-    // Telegram Style Accent Badge
-    self.consoleBadge = [[UILabel alloc] initWithFrame:CGRectMake(78, 9, 24, 18)];
-    self.consoleBadge.text = @"0";
-    self.consoleBadge.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightSemibold];
-    self.consoleBadge.textColor = [UIColor whiteColor];
-    self.consoleBadge.textAlignment = NSTextAlignmentCenter;
-    self.consoleBadge.backgroundColor = [UIColor colorWithRed:0.20 green:0.55 blue:0.95 alpha:0.95];
-    self.consoleBadge.layer.cornerRadius = 9;
-    self.consoleBadge.layer.masksToBounds = YES;
-    self.consoleBadge.userInteractionEnabled = NO;
-    [self.consoleTabBtn addSubview:self.consoleBadge];
     
     self.navigationItem.titleView = self.tabsRootContainer;
 }
 
-#pragma mark - Elastic Fluid Geometry
+#pragma mark - Elastic Liquid Glass Geometry
 
 - (CGRect)indicatorFrameForProgress:(CGFloat)progress {
     CGFloat startX = kPadding;
-    CGFloat endX = (kBarWidth * 0.5) + kPadding - 3.0;
+    CGFloat endX = (kBarWidth * 0.5) + kPadding;
     CGFloat currentX = startX + progress * (endX - startX);
     
-    // Liquid stretch deformation: expands during transit, snaps on arrival
-    CGFloat stretch = sin(progress * M_PI) * 12.0;
+    // Telegram-style liquid stretch: expands during transit, snaps back on destination
+    CGFloat stretch = sin(progress * M_PI) * 14.0;
     CGFloat width = kBasePillWidth + stretch;
     CGFloat centeredX = currentX - (stretch * 0.5);
     
     return CGRectMake(centeredX, kPadding, width, kPillHeight);
+}
+
+- (void)updateSpecularFrame {
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    self.specularGlassHighlight.frame = self.slidingIndicator.bounds;
+    [CATransaction commit];
 }
 
 #pragma mark - Fullscreen Horizontal Pager
@@ -338,6 +335,7 @@ static const CGFloat kBasePillWidth = 120.0;
         progress = fmax(0.0, fmin(1.0, progress));
         
         self.slidingIndicator.frame = [self indicatorFrameForProgress:progress];
+        [self updateSpecularFrame];
         [self updateTabLabelsForProgress:progress];
     }
 }
@@ -373,9 +371,10 @@ static const CGFloat kBasePillWidth = 120.0;
     CGFloat targetX = (index == 0) ? 0.0 : self.pagingScrollView.bounds.size.width;
     CGRect targetFrame = [self indicatorFrameForProgress:targetProgress];
     
-    // Telegram-style Spring Physics (0.45s duration, 0.76 damping, 0.8 initial velocity)
-    [UIView animateWithDuration:0.45 delay:0 usingSpringWithDamping:0.76 initialSpringVelocity:0.8 options:UIViewAnimationOptionCurveEaseInOut animations:^{
+    // Telegram-style Spring Physics (0.42s duration, 0.76 damping, 0.8 initial velocity)
+    [UIView animateWithDuration:0.42 delay:0 usingSpringWithDamping:0.76 initialSpringVelocity:0.8 options:UIViewAnimationOptionCurveEaseInOut animations:^{
         self.slidingIndicator.frame = targetFrame;
+        [self updateSpecularFrame];
         [self updateTabLabelsForProgress:targetProgress];
         [self.pagingScrollView setContentOffset:CGPointMake(targetX, 0) animated:NO];
     } completion:^(BOOL finished) {
@@ -438,7 +437,6 @@ static const CGFloat kBasePillWidth = 120.0;
     [self.logHistory addObject:line];
     if (self.logHistory.count > 300) [self.logHistory removeObjectAtIndex:0];
     dispatch_async(dispatch_get_main_queue(), ^{
-        self.consoleBadge.text = [NSString stringWithFormat:@"%lu", (unsigned long)self.logHistory.count];
         self.consoleTextView.text = [self.logHistory componentsJoinedByString:@"\n"];
         if (self.consoleTextView.text.length > 0)
             [self.consoleTextView scrollRangeToVisible:NSMakeRange(self.consoleTextView.text.length - 1, 1)];
@@ -452,7 +450,6 @@ static const CGFloat kBasePillWidth = 120.0;
 
 - (void)clearLogs {
     [self.logHistory removeAllObjects];
-    self.consoleBadge.text = @"0";
     self.consoleTextView.text = @"";
 }
 
