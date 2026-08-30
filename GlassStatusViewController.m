@@ -6,18 +6,21 @@
 
 @interface GlassStatusViewController () <UIScrollViewDelegate>
 
-// Navigation Bar Segmented Container (Telegram Folder Tabs Style)
+// Navigation Bar Folder Tabs (Telegram-iOS Component Style)
 @property (nonatomic, strong) UIView *tabsContainer;
 @property (nonatomic, strong) UIView *capsuleBackground;
-@property (nonatomic, strong) UIView *slidingPill;
-@property (nonatomic, strong) UIVisualEffectView *pillGlassEffectView;
-@property (nonatomic, strong) UIView *pillHighlightView;
+@property (nonatomic, strong) UIView *slidingIndicator;
+@property (nonatomic, strong) UIVisualEffectView *glassLensEffectView;
+@property (nonatomic, strong) UIView *restingHighlightView;
+
 @property (nonatomic, strong) UIButton *dashboardTabBtn;
 @property (nonatomic, strong) UIButton *consoleTabBtn;
-@property (nonatomic, strong) UILabel *consoleUnreadBadge;
+@property (nonatomic, strong) UILabel *dashboardTitleLabel;
+@property (nonatomic, strong) UILabel *consoleTitleLabel;
+@property (nonatomic, strong) UILabel *consoleBadge;
 @property (nonatomic, strong) UIView *liveStatusDot;
 
-// Dynamic Transition / Lifted State (Telegram isLifted logic)
+// Telegram isLifted transition management
 @property (nonatomic, assign) BOOL isLifted;
 @property (nonatomic, strong) NSTimer *liftTimer;
 
@@ -35,11 +38,11 @@
 
 @end
 
-static const CGFloat kTotalWidth = 240.0;
+static const CGFloat kTotalWidth = 250.0;
 static const CGFloat kTotalHeight = 36.0;
-static const CGFloat kPadding = 3.0;
-static const CGFloat kPillHeight = 30.0;
-static const CGFloat kPillWidth = 114.0; // (240 - 2*3) / 2 - 3 = 114
+static const CGFloat kBarPadding = 3.0;
+static const CGFloat kIndicatorHeight = 30.0;
+static const CGFloat kIndicatorWidth = 120.0;
 
 @implementation GlassStatusViewController
 
@@ -51,7 +54,7 @@ static const CGFloat kPillWidth = 114.0; // (240 - 2*3) / 2 - 3 = 114
     self.isLifted = NO;
     
     [self loadSystemInfo];
-    [self setupTelegramStyleFolderTabs];
+    [self setupTelegramStyleFolderNavigation];
     [self setupFullscreenPaging];
     
     [MHAServer sharedServer].delegate = self;
@@ -74,7 +77,7 @@ static const CGFloat kPillWidth = 114.0; // (240 - 2*3) / 2 - 3 = 114
     self.activeClientsCount = 0;
 }
 
-#pragma mark - Telegram-iOS Style Folder Tabs Navigation
+#pragma mark - Telegram-iOS Style Folder Tabs
 
 - (UIVisualEffect *)createAppleGlassEffect {
     Class glassClass = NSClassFromString(@"UIGlassEffect");
@@ -85,11 +88,11 @@ static const CGFloat kPillWidth = 114.0; // (240 - 2*3) / 2 - 3 = 114
     return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterialDark];
 }
 
-- (void)setupTelegramStyleFolderTabs {
+- (void)setupTelegramStyleFolderNavigation {
     if (!self.navigationController) return;
     
     self.navigationController.navigationBar.prefersLargeTitles = NO;
-    self.navigationController.navigationBar.tintColor = [UIColor colorWithRed:0.22 green:0.53 blue:0.95 alpha:1.0];
+    self.navigationController.navigationBar.tintColor = [UIColor colorWithRed:0.20 green:0.55 blue:0.95 alpha:1.0];
     
     UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
     [appearance configureWithTransparentBackground];
@@ -101,89 +104,106 @@ static const CGFloat kPillWidth = 114.0; // (240 - 2*3) / 2 - 3 = 114
     UIBarButtonItem *shareItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(shareLogs)];
     self.navigationItem.rightBarButtonItem = shareItem;
     
-    // === Main Capsule Container (240 x 36) ===
+    // === Outer Tabs Frame (250 x 36) ===
     self.tabsContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kTotalWidth, kTotalHeight)];
     self.tabsContainer.backgroundColor = [UIColor clearColor];
     
-    // === Outer Resting Capsule Background ===
+    // === Capsule Bar Background ===
     self.capsuleBackground = [[UIView alloc] initWithFrame:self.tabsContainer.bounds];
-    self.capsuleBackground.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.14 alpha:0.85];
+    self.capsuleBackground.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.75];
     self.capsuleBackground.layer.cornerRadius = kTotalHeight * 0.5;
     self.capsuleBackground.layer.cornerCurve = kCACornerCurveContinuous;
-    self.capsuleBackground.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.10].CGColor;
+    self.capsuleBackground.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.12].CGColor;
     self.capsuleBackground.layer.borderWidth = 0.5;
     self.capsuleBackground.clipsToBounds = YES;
     self.capsuleBackground.userInteractionEnabled = NO;
     [self.tabsContainer addSubview:self.capsuleBackground];
     
-    // === Sliding Indicator Pill (Contains UIGlassEffect for dynamic liquid glass) ===
-    self.slidingPill = [[UIView alloc] initWithFrame:CGRectMake(kPadding, kPadding, kPillWidth, kPillHeight)];
-    self.slidingPill.layer.cornerRadius = kPillHeight * 0.5;
-    self.slidingPill.layer.cornerCurve = kCACornerCurveContinuous;
-    self.slidingPill.clipsToBounds = YES;
-    self.slidingPill.userInteractionEnabled = NO;
+    // === Active Sliding Indicator (Contains Liquid Glass Layer) ===
+    self.slidingIndicator = [[UIView alloc] initWithFrame:CGRectMake(kBarPadding, kBarPadding, kIndicatorWidth, kIndicatorHeight)];
+    self.slidingIndicator.layer.cornerRadius = kIndicatorHeight * 0.5;
+    self.slidingIndicator.layer.cornerCurve = kCACornerCurveContinuous;
+    self.slidingIndicator.clipsToBounds = YES;
+    self.slidingIndicator.userInteractionEnabled = NO;
     
-    // 1. Apple UIGlassEffect View (Active during transition)
+    // 1. Dynamic Liquid Glass Lens (Apple UIGlassEffect)
     UIVisualEffect *glassEffect = [self createAppleGlassEffect];
-    self.pillGlassEffectView = [[UIVisualEffectView alloc] initWithEffect:glassEffect];
-    self.pillGlassEffectView.frame = self.slidingPill.bounds;
-    self.pillGlassEffectView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.pillGlassEffectView.alpha = 0.0; // In resting state, subtle highlight is shown instead
-    [self.slidingPill addSubview:self.pillGlassEffectView];
+    self.glassLensEffectView = [[UIVisualEffectView alloc] initWithEffect:glassEffect];
+    self.glassLensEffectView.frame = self.slidingIndicator.bounds;
+    self.glassLensEffectView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.glassLensEffectView.layer.cornerRadius = kIndicatorHeight * 0.5;
+    self.glassLensEffectView.layer.cornerCurve = kCACornerCurveContinuous;
+    self.glassLensEffectView.clipsToBounds = YES;
+    self.glassLensEffectView.alpha = 0.0;
+    [self.slidingIndicator addSubview:self.glassLensEffectView];
     
-    // 2. Resting Highlight View (Subtle clean material in resting state)
-    self.pillHighlightView = [[UIView alloc] initWithFrame:self.slidingPill.bounds];
-    self.pillHighlightView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.pillHighlightView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.18];
-    self.pillHighlightView.layer.cornerRadius = kPillHeight * 0.5;
-    self.pillHighlightView.layer.cornerCurve = kCACornerCurveContinuous;
-    self.pillHighlightView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.20].CGColor;
-    self.pillHighlightView.layer.borderWidth = 0.5;
-    [self.slidingPill addSubview:self.pillHighlightView];
+    // 2. Resting Highlight Fill
+    self.restingHighlightView = [[UIView alloc] initWithFrame:self.slidingIndicator.bounds];
+    self.restingHighlightView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.restingHighlightView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.16];
+    self.restingHighlightView.layer.cornerRadius = kIndicatorHeight * 0.5;
+    self.restingHighlightView.layer.cornerCurve = kCACornerCurveContinuous;
+    self.restingHighlightView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
+    self.restingHighlightView.layer.borderWidth = 0.5;
+    [self.slidingIndicator addSubview:self.restingHighlightView];
     
-    [self.tabsContainer addSubview:self.slidingPill];
+    [self.tabsContainer addSubview:self.slidingIndicator];
     
-    // === Interactive Tab 1: Dashboard ===
+    // === Tab 1: Dashboard Button & Label ===
     self.dashboardTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     self.dashboardTabBtn.frame = CGRectMake(0, 0, kTotalWidth * 0.5, kTotalHeight);
-    [self.dashboardTabBtn setTitle:@"Dashboard" forState:UIControlStateNormal];
-    [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     [self.dashboardTabBtn addTarget:self action:@selector(selectDashboard) forControlEvents:UIControlEventTouchUpInside];
     [self.tabsContainer addSubview:self.dashboardTabBtn];
     
-    // Green Online Status Dot
+    // Green Status Dot
     self.liveStatusDot = [[UIView alloc] initWithFrame:CGRectMake(14, 15, 6, 6)];
     self.liveStatusDot.backgroundColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:1.0];
     self.liveStatusDot.layer.cornerRadius = 3;
+    self.liveStatusDot.layer.shadowColor = [UIColor colorWithRed:0.25 green:0.90 blue:0.55 alpha:0.8].CGColor;
+    self.liveStatusDot.layer.shadowOffset = CGSizeZero;
+    self.liveStatusDot.layer.shadowRadius = 3.0;
+    self.liveStatusDot.layer.shadowOpacity = 0.8;
     self.liveStatusDot.userInteractionEnabled = NO;
     [self.dashboardTabBtn addSubview:self.liveStatusDot];
     
-    // === Interactive Tab 2: Console ===
+    self.dashboardTitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(26, 0, (kTotalWidth * 0.5) - 30, kTotalHeight)];
+    self.dashboardTitleLabel.text = @"Dashboard";
+    self.dashboardTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightSemibold];
+    self.dashboardTitleLabel.textColor = [UIColor whiteColor];
+    self.dashboardTitleLabel.textAlignment = NSTextAlignmentLeft;
+    self.dashboardTitleLabel.userInteractionEnabled = NO;
+    [self.dashboardTabBtn addSubview:self.dashboardTitleLabel];
+    
+    // === Tab 2: Console Button, Label & Telegram Badge ===
     self.consoleTabBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     self.consoleTabBtn.frame = CGRectMake(kTotalWidth * 0.5, 0, kTotalWidth * 0.5, kTotalHeight);
-    [self.consoleTabBtn setTitle:@"Console" forState:UIControlStateNormal];
-    [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
-    self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     [self.consoleTabBtn addTarget:self action:@selector(selectConsole) forControlEvents:UIControlEventTouchUpInside];
     [self.tabsContainer addSubview:self.consoleTabBtn];
     
-    // Badge
-    self.consoleUnreadBadge = [[UILabel alloc] initWithFrame:CGRectMake(86, 10, 18, 16)];
-    self.consoleUnreadBadge.text = @"0";
-    self.consoleUnreadBadge.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightBold];
-    self.consoleUnreadBadge.textColor = [UIColor whiteColor];
-    self.consoleUnreadBadge.textAlignment = NSTextAlignmentCenter;
-    self.consoleUnreadBadge.backgroundColor = [UIColor colorWithRed:0.22 green:0.53 blue:0.95 alpha:0.90];
-    self.consoleUnreadBadge.layer.cornerRadius = 8;
-    self.consoleUnreadBadge.layer.masksToBounds = YES;
-    self.consoleUnreadBadge.userInteractionEnabled = NO;
-    [self.consoleTabBtn addSubview:self.consoleUnreadBadge];
+    self.consoleTitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 0, 60, kTotalHeight)];
+    self.consoleTitleLabel.text = @"Console";
+    self.consoleTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightMedium];
+    self.consoleTitleLabel.textColor = [UIColor colorWithWhite:0.60 alpha:1.0];
+    self.consoleTitleLabel.textAlignment = NSTextAlignmentLeft;
+    self.consoleTitleLabel.userInteractionEnabled = NO;
+    [self.consoleTabBtn addSubview:self.consoleTitleLabel];
+    
+    // Telegram Style Capsule Badge
+    self.consoleBadge = [[UILabel alloc] initWithFrame:CGRectMake(78, 9, 24, 18)];
+    self.consoleBadge.text = @"0";
+    self.consoleBadge.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightSemibold];
+    self.consoleBadge.textColor = [UIColor whiteColor];
+    self.consoleBadge.textAlignment = NSTextAlignmentCenter;
+    self.consoleBadge.backgroundColor = [UIColor colorWithRed:0.20 green:0.55 blue:0.95 alpha:0.95];
+    self.consoleBadge.layer.cornerRadius = 9;
+    self.consoleBadge.layer.masksToBounds = YES;
+    self.consoleBadge.userInteractionEnabled = NO;
+    [self.consoleTabBtn addSubview:self.consoleBadge];
     
     self.navigationItem.titleView = self.tabsContainer;
 }
 
-#pragma mark - Telegram-iOS Lift / Transition Animation
+#pragma mark - Telegram-iOS Lifted State Transition
 
 - (void)setLifted:(BOOL)lifted animated:(BOOL)animated {
     if (self.isLifted == lifted) return;
@@ -191,19 +211,19 @@ static const CGFloat kPillWidth = 114.0; // (240 - 2*3) / 2 - 3 = 114
     
     void (^animations)(void) = ^{
         if (lifted) {
-            // Transition state: activate liquid glass refraction, fade out static capsule
-            self.pillGlassEffectView.alpha = 1.0;
-            self.pillHighlightView.alpha = 0.0;
-            self.capsuleBackground.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.10 alpha:0.40];
+            // When user swipes/transitions: morph into liquid glass lens
+            self.glassLensEffectView.alpha = 1.0;
+            self.restingHighlightView.alpha = 0.0;
+            self.capsuleBackground.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.40];
             self.capsuleBackground.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
-            self.slidingPill.transform = CGAffineTransformMakeScale(1.04, 1.04);
+            self.slidingIndicator.transform = CGAffineTransformMakeScale(1.03, 1.03);
         } else {
-            // Resting state: settle down to clean resting material
-            self.pillGlassEffectView.alpha = 0.0;
-            self.pillHighlightView.alpha = 1.0;
-            self.capsuleBackground.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.14 alpha:0.85];
-            self.capsuleBackground.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.10].CGColor;
-            self.slidingPill.transform = CGAffineTransformIdentity;
+            // Resting state: settle into clean resting highlight
+            self.glassLensEffectView.alpha = 0.0;
+            self.restingHighlightView.alpha = 1.0;
+            self.capsuleBackground.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.75];
+            self.capsuleBackground.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.12].CGColor;
+            self.slidingIndicator.transform = CGAffineTransformIdentity;
         }
     };
     
@@ -334,24 +354,24 @@ static const CGFloat kPillWidth = 114.0; // (240 - 2*3) / 2 - 3 = 114
         CGFloat progress = self.pagingScrollView.contentOffset.x / pageWidth;
         progress = fmax(0.0, fmin(1.0, progress));
         
-        // Telegram: interpolate indicator position between tab bounds
-        CGFloat startX = kPadding;
-        CGFloat endX = kTotalWidth * 0.5 + kPadding;
+        // Exact Telegram interpolation between tab centers
+        CGFloat startX = kBarPadding;
+        CGFloat endX = (kTotalWidth * 0.5) + kBarPadding - 3.0;
         CGFloat currentX = startX + progress * (endX - startX);
         
-        self.slidingPill.frame = CGRectMake(currentX, kPadding, kPillWidth, kPillHeight);
+        self.slidingIndicator.frame = CGRectMake(currentX, kBarPadding, kIndicatorWidth, kIndicatorHeight);
         
-        // Update tab text contrast
+        // Dynamic label colors and weights
         if (progress < 0.5) {
-            [self.dashboardTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-            self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-            [self.consoleTabBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
-            self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+            self.dashboardTitleLabel.textColor = [UIColor whiteColor];
+            self.dashboardTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightSemibold];
+            self.consoleTitleLabel.textColor = [UIColor colorWithWhite:0.60 alpha:1.0];
+            self.consoleTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightMedium];
         } else {
-            [self.dashboardTabBtn setTitleColor:[UIColor colorWithWhite:0.65 alpha:1.0] forState:UIControlStateNormal];
-            self.dashboardTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-            [self.consoleTabBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-            self.consoleTabBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+            self.dashboardTitleLabel.textColor = [UIColor colorWithWhite:0.60 alpha:1.0];
+            self.dashboardTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightMedium];
+            self.consoleTitleLabel.textColor = [UIColor whiteColor];
+            self.consoleTitleLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightSemibold];
         }
     }
 }
@@ -437,7 +457,7 @@ static const CGFloat kPillWidth = 114.0; // (240 - 2*3) / 2 - 3 = 114
     [self.logHistory addObject:line];
     if (self.logHistory.count > 300) [self.logHistory removeObjectAtIndex:0];
     dispatch_async(dispatch_get_main_queue(), ^{
-        self.consoleUnreadBadge.text = [NSString stringWithFormat:@"%lu", (unsigned long)self.logHistory.count];
+        self.consoleBadge.text = [NSString stringWithFormat:@"%lu", (unsigned long)self.logHistory.count];
         self.consoleTextView.text = [self.logHistory componentsJoinedByString:@"\n"];
         if (self.consoleTextView.text.length > 0)
             [self.consoleTextView scrollRangeToVisible:NSMakeRange(self.consoleTextView.text.length - 1, 1)];
@@ -451,7 +471,7 @@ static const CGFloat kPillWidth = 114.0; // (240 - 2*3) / 2 - 3 = 114
 
 - (void)clearLogs {
     [self.logHistory removeAllObjects];
-    self.consoleUnreadBadge.text = @"0";
+    self.consoleBadge.text = @"0";
     self.consoleTextView.text = @"";
 }
 
