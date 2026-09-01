@@ -9,8 +9,6 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 
-#define MHA_BUFFER_SIZE (512 * 1024)
-
 @interface MHAServer () {
     int _serverSocket;
 }
@@ -59,7 +57,7 @@
         @"os_version": osVersion,
         @"process_name": [[NSProcessInfo processInfo] processName],
         @"pid": @([[NSProcessInfo processInfo] processIdentifier]),
-        @"server_version": @"1.3.0"
+        @"server_version": @"1.4.0"
     };
 }
 
@@ -135,23 +133,34 @@
 
 - (void)handleClient:(int)clientFd {
     @autoreleasepool {
-        uint8_t *buffer = malloc(MHA_BUFFER_SIZE);
-        if (!buffer) {
+        // Set receive timeout so read loop finishes when client stops sending
+        struct timeval tv;
+        tv.tv_sec = 2;
+        tv.tv_usec = 0;
+        setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+
+        NSMutableData *incomingData = [NSMutableData data];
+        uint8_t chunk[32768];
+        
+        while (YES) {
+            ssize_t n = read(clientFd, chunk, sizeof(chunk));
+            if (n > 0) {
+                [incomingData appendBytes:chunk length:n];
+                // Check if simple single-line command ended
+                if (incomingData.length < 512 && strchr((char *)incomingData.bytes, '\n') && !strstr((char *)incomingData.bytes, "WRITE")) {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        if (incomingData.length == 0) {
             close(clientFd);
             return;
         }
 
-        ssize_t bytesRead = read(clientFd, buffer, MHA_BUFFER_SIZE - 1);
-        if (bytesRead <= 0) {
-            free(buffer);
-            close(clientFd);
-            return;
-        }
-        buffer[bytesRead] = '\0';
-
-        NSString *requestStr = [[NSString alloc] initWithBytes:buffer length:bytesRead encoding:NSUTF8StringEncoding];
-        free(buffer);
-
+        NSString *requestStr = [[NSString alloc] initWithData:incomingData encoding:NSUTF8StringEncoding];
         if (!requestStr || requestStr.length == 0) {
             close(clientFd);
             return;
@@ -182,107 +191,13 @@
                 [self log:[NSString stringWithFormat:@"App enumeration failed: %@", err] isError:YES];
             }
         } else if ([command isEqualToString:@"CONTAINERS"]) {
-            // CONTAINERS <class_id>
             uint64_t cClass = parts.count > 1 ? [parts[1] longLongValue] : 7;
             NSString *err = nil;
             NSArray *containers = [MCMBridge listAllContainersForClass:cClass error:&err];
             response[@"status"] = @"success";
             response[@"data"] = @{@"class": @(cClass), @"count": @(containers.count), @"containers": containers ?: @[]};
             [self log:[NSString stringWithFormat:@"Enumerated %lu containers for class %llu", (unsigned long)containers.count, cClass] isError:NO];
-        } else if ([command isEqualToString:@"SHORTCUTS"]) {
-            // Interrogate VoiceShortcutClient, WorkflowKit, and Intents
-            dlopen("/System/Library/PrivateFrameworks/VoiceShortcutClient.framework/VoiceShortcutClient", RTLD_NOW);
-            dlopen("/System/Library/PrivateFrameworks/WorkflowKit.framework/WorkflowKit", RTLD_NOW);
-            dlopen("/System/Library/Frameworks/Intents.framework/Intents", RTLD_NOW);
-
-            NSMutableArray *shortcutList = [NSMutableArray array];
-            NSString *dbPath = @"";
-
-            // 1. Check WFDatabase defaultDatabase
-            Class wfDbClass = NSClassFromString(@"WFDatabase");
-            if (wfDbClass) {
-                if ([wfDbClass respondsToSelector:sel_registerName("defaultDatabaseURL")]) {
-                    NSURL *url = ((NSURL *(*)(id, SEL))objc_msgSend)(wfDbClass, sel_registerName("defaultDatabaseURL"));
-                    if (url) dbPath = url.path ?: url.absoluteString;
-                }
-                if ([wfDbClass respondsToSelector:sel_registerName("defaultDatabase")]) {
-                    id db = ((id (*)(id, SEL))objc_msgSend)(wfDbClass, sel_registerName("defaultDatabase"));
-                    if (db && [db respondsToSelector:sel_registerName("visibleWorkflows")]) {
-                        NSArray *workflows = ((NSArray *(*)(id, SEL))objc_msgSend)(db, sel_registerName("visibleWorkflows"));
-                        for (id wf in workflows) {
-                            NSString *name = [wf respondsToSelector:sel_registerName("name")] ? ((NSString *(*)(id, SEL))objc_msgSend)(wf, sel_registerName("name")) : @"";
-                            NSString *wfId = [wf respondsToSelector:sel_registerName("workflowID")] ? ((NSString *(*)(id, SEL))objc_msgSend)(wf, sel_registerName("workflowID")) : @"";
-                            NSUInteger actionsCount = [wf respondsToSelector:sel_registerName("actions")] ? [((NSArray *(*)(id, SEL))objc_msgSend)(wf, sel_registerName("actions")) count] : 0;
-                            [shortcutList addObject:@{
-                                @"name": name ?: @"Unnamed",
-                                @"id": wfId ?: @"",
-                                @"actions_count": @(actionsCount)
-                            }];
-                        }
-                    }
-                }
-            }
-
-            // 2. Query VCVoiceShortcutClient
-            Class vcClientClass = NSClassFromString(@"VCVoiceShortcutClient");
-            if (vcClientClass && shortcutList.count == 0) {
-                id client = ((id (*)(id, SEL))objc_msgSend)(vcClientClass, sel_registerName("standardClient"));
-                if (client) {
-                    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-                    if ([client respondsToSelector:sel_registerName("getVoiceShortcutsWithCompletion:")]) {
-                        ((void (*)(id, SEL, void (^)(NSArray *, NSError *)))objc_msgSend)(client, sel_registerName("getVoiceShortcutsWithCompletion:"), ^(NSArray *shortcuts, NSError *error) {
-                            if (shortcuts) {
-                                for (id sc in shortcuts) {
-                                    NSString *phrase = [sc respondsToSelector:sel_registerName("phrase")] ? ((NSString *(*)(id, SEL))objc_msgSend)(sc, sel_registerName("phrase")) : @"";
-                                    NSString *name = [sc respondsToSelector:sel_registerName("shortcutName")] ? ((NSString *(*)(id, SEL))objc_msgSend)(sc, sel_registerName("shortcutName")) : phrase;
-                                    NSString *scId = [sc respondsToSelector:sel_registerName("identifier")] ? [((NSUUID *(*)(id, SEL))objc_msgSend)(sc, sel_registerName("identifier")) UUIDString] : @"";
-                                    [shortcutList addObject:@{
-                                        @"name": name ?: @"Unnamed",
-                                        @"id": scId ?: @"",
-                                        @"phrase": phrase ?: @""
-                                    }];
-                                }
-                            }
-                            dispatch_semaphore_signal(sem);
-                        });
-                        dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC));
-                    }
-                }
-            }
-
-            // 3. Query INVoiceShortcutCenter
-            Class centerClass = NSClassFromString(@"INVoiceShortcutCenter");
-            if (centerClass && shortcutList.count == 0) {
-                id center = ((id (*)(id, SEL))objc_msgSend)(centerClass, sel_registerName("sharedCenter"));
-                if (center && [center respondsToSelector:sel_registerName("getAllVoiceShortcutsWithCompletion:")]) {
-                    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-                    ((void (*)(id, SEL, void (^)(NSArray *, NSError *)))objc_msgSend)(center, sel_registerName("getAllVoiceShortcutsWithCompletion:"), ^(NSArray *voiceShortcuts, NSError *error) {
-                        if (voiceShortcuts) {
-                            for (id sc in voiceShortcuts) {
-                                NSString *phrase = [sc respondsToSelector:sel_registerName("invocationPhrase")] ? ((NSString *(*)(id, SEL))objc_msgSend)(sc, sel_registerName("invocationPhrase")) : @"";
-                                NSString *scId = [sc respondsToSelector:sel_registerName("identifier")] ? [((NSUUID *(*)(id, SEL))objc_msgSend)(sc, sel_registerName("identifier")) UUIDString] : @"";
-                                [shortcutList addObject:@{
-                                    @"name": phrase ?: @"Unnamed Shortcut",
-                                    @"id": scId ?: @"",
-                                    @"phrase": phrase ?: @""
-                                }];
-                            }
-                        }
-                        dispatch_semaphore_signal(sem);
-                    });
-                    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC));
-                }
-            }
-
-            response[@"status"] = @"success";
-            response[@"data"] = @{
-                @"count": @(shortcutList.count),
-                @"database_path": dbPath ?: @"",
-                @"shortcuts": shortcutList
-            };
-            [self log:[NSString stringWithFormat:@"Found %lu user shortcuts (DB: %@)", (unsigned long)shortcutList.count, dbPath] isError:NO];
         } else if ([command isEqualToString:@"ACTIVATE"]) {
-            // ACTIVATE <class> <is_group> <identifier>
             if (parts.count >= 4) {
                 uint64_t containerClass = [parts[1] longLongValue];
                 BOOL isGroup = [parts[2] boolValue];
@@ -310,7 +225,6 @@
                 response[@"error"] = @"Invalid arguments for ACTIVATE";
             }
         } else if ([command isEqualToString:@"LS"]) {
-            // LS <path>
             if (firstLine.length > 3) {
                 NSString *path = [firstLine substringFromIndex:3];
                 NSFileManager *fm = [NSFileManager defaultManager];
@@ -340,7 +254,6 @@
                 }
             }
         } else if ([command isEqualToString:@"READ"]) {
-            // READ <path>
             if (firstLine.length > 5) {
                 NSString *filePath = [firstLine substringFromIndex:5];
                 NSData *fileData = [NSData dataWithContentsOfFile:filePath];
