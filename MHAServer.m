@@ -1,66 +1,63 @@
 #import "MHAServer.h"
 #import "MCMBridge.h"
+#import <sys/utsname.h>
 #import <sys/socket.h>
 #import <netinet/in.h>
-#import <unistd.h>
 #import <arpa/inet.h>
-#import <sys/utsname.h>
+#import <unistd.h>
+#import <dlfcn.h>
+#import <objc/runtime.h>
+#import <objc/message.h>
 
-#define MHA_BUFFER_SIZE 131072
+#define MHA_BUFFER_SIZE (512 * 1024)
 
 @interface MHAServer () {
     int _serverSocket;
-    dispatch_queue_t _serverQueue;
-    dispatch_source_t _listenSource;
-    NSUInteger _activeClients;
 }
-@property (nonatomic, assign, readwrite) uint16_t port;
-@property (nonatomic, assign, readwrite) BOOL isRunning;
 @end
 
 @implementation MHAServer
 
 + (instancetype)sharedServer {
-    static MHAServer *sharedInstance = nil;
+    static MHAServer *server = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        sharedInstance = [[self alloc] init];
+        server = [[MHAServer alloc] init];
     });
-    return sharedInstance;
+    return server;
 }
 
 - (instancetype)init {
     self = [super init];
     if (self) {
         _serverSocket = -1;
-        _serverQueue = dispatch_queue_create("com.mha.server.queue", DISPATCH_QUEUE_SERIAL);
-        _activeClients = 0;
         _isRunning = NO;
+        _port = 8080;
     }
     return self;
 }
 
-- (void)log:(NSString *)message isError:(BOOL)isError {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if ([self.delegate respondsToSelector:@selector(serverDidLogMessage:isError:)]) {
-            [self.delegate serverDidLogMessage:message isError:isError];
-        }
-    });
+- (void)log:(NSString *)msg isError:(BOOL)isErr {
+    NSLog(@"[MHAServer] %@", msg);
+    if ([self.delegate respondsToSelector:@selector(serverDidLogMessage:isError:)]) {
+        [self.delegate serverDidLogMessage:msg isError:isErr];
+    }
 }
 
 - (NSDictionary *)collectSystemMetadata {
     struct utsname systemInfo;
     uname(&systemInfo);
-    NSString *deviceModel = [NSString stringWithCString:systemInfo.machine encoding:NSUTF8StringEncoding] ?: @"Unknown";
-    NSOperatingSystemVersion osVer = [[NSProcessInfo processInfo] operatingSystemVersion];
-    NSString *osVersion = [NSString stringWithFormat:@"%ld.%ld.%ld", (long)osVer.majorVersion, (long)osVer.minorVersion, (long)osVer.patchVersion];
+    NSString *deviceModel = [NSString stringWithCString:systemInfo.machine encoding:NSUTF8StringEncoding] ?: @"iPhone";
+
+    NSOperatingSystemVersion os = [[NSProcessInfo processInfo] operatingSystemVersion];
+    NSString *osVersion = [NSString stringWithFormat:@"%ld.%ld.%ld", (long)os.majorVersion, (long)os.minorVersion, (long)os.patchVersion];
 
     return @{
         @"device_model": deviceModel,
         @"os_version": osVersion,
         @"process_name": [[NSProcessInfo processInfo] processName],
         @"pid": @([[NSProcessInfo processInfo] processIdentifier]),
-        @"server_version": @"1.2.0"
+        @"server_version": @"1.3.0"
     };
 }
 
@@ -182,6 +179,106 @@
                 response[@"error"] = err ?: @"No applications resolved";
                 [self log:[NSString stringWithFormat:@"App enumeration failed: %@", err] isError:YES];
             }
+        } else if ([command isEqualToString:@"CONTAINERS"]) {
+            // CONTAINERS <class_id>
+            uint64_t cClass = parts.count > 1 ? [parts[1] longLongValue] : 7;
+            NSString *err = nil;
+            NSArray *containers = [MCMBridge listAllContainersForClass:cClass error:&err];
+            response[@"status"] = @"success";
+            response[@"data"] = @{@"class": @(cClass), @"count": @(containers.count), @"containers": containers ?: @[]};
+            [self log:[NSString stringWithFormat:@"Enumerated %lu containers for class %llu", (unsigned long)containers.count, cClass] isError:NO];
+        } else if ([command isEqualToString:@"SHORTCUTS"]) {
+            // Interrogate VoiceShortcutClient, WorkflowKit, and Intents
+            dlopen("/System/Library/PrivateFrameworks/VoiceShortcutClient.framework/VoiceShortcutClient", RTLD_NOW);
+            dlopen("/System/Library/PrivateFrameworks/WorkflowKit.framework/WorkflowKit", RTLD_NOW);
+            dlopen("/System/Library/Frameworks/Intents.framework/Intents", RTLD_NOW);
+
+            NSMutableArray *shortcutList = [NSMutableArray array];
+            NSString *dbPath = @"";
+
+            // 1. Check WFDatabase defaultDatabase
+            Class wfDbClass = NSClassFromString(@"WFDatabase");
+            if (wfDbClass) {
+                if ([wfDbClass respondsToSelector:sel_registerName("defaultDatabaseURL")]) {
+                    NSURL *url = ((NSURL *(*)(id, SEL))objc_msgSend)(wfDbClass, sel_registerName("defaultDatabaseURL"));
+                    if (url) dbPath = url.path ?: url.absoluteString;
+                }
+                if ([wfDbClass respondsToSelector:sel_registerName("defaultDatabase")]) {
+                    id db = ((id (*)(id, SEL))objc_msgSend)(wfDbClass, sel_registerName("defaultDatabase"));
+                    if (db && [db respondsToSelector:sel_registerName("visibleWorkflows")]) {
+                        NSArray *workflows = ((NSArray *(*)(id, SEL))objc_msgSend)(db, sel_registerName("visibleWorkflows"));
+                        for (id wf in workflows) {
+                            NSString *name = [wf respondsToSelector:sel_registerName("name")] ? ((NSString *(*)(id, SEL))objc_msgSend)(wf, sel_registerName("name")) : @"";
+                            NSString *wfId = [wf respondsToSelector:sel_registerName("workflowID")] ? ((NSString *(*)(id, SEL))objc_msgSend)(wf, sel_registerName("workflowID")) : @"";
+                            NSUInteger actionsCount = [wf respondsToSelector:sel_registerName("actions")] ? [((NSArray *(*)(id, SEL))objc_msgSend)(wf, sel_registerName("actions")) count] : 0;
+                            [shortcutList addObject:@{
+                                @"name": name ?: @"Unnamed",
+                                @"id": wfId ?: @"",
+                                @"actions_count": @(actionsCount)
+                            }];
+                        }
+                    }
+                }
+            }
+
+            // 2. Query VCVoiceShortcutClient
+            Class vcClientClass = NSClassFromString(@"VCVoiceShortcutClient");
+            if (vcClientClass) {
+                id client = ((id (*)(id, SEL))objc_msgSend)(vcClientClass, sel_registerName("standardClient"));
+                if (client) {
+                    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+                    if ([client respondsToSelector:sel_registerName("getVoiceShortcutsWithCompletion:")]) {
+                        ((void (*)(id, SEL, void (^)(NSArray *, NSError *)))objc_msgSend)(client, sel_registerName("getVoiceShortcutsWithCompletion:"), ^(NSArray *shortcuts, NSError *error) {
+                            if (shortcuts) {
+                                for (id sc in shortcuts) {
+                                    NSString *phrase = [sc respondsToSelector:sel_registerName("phrase")] ? ((NSString *(*)(id, SEL))objc_msgSend)(sc, sel_registerName("phrase")) : @"";
+                                    NSString *name = [sc respondsToSelector:sel_registerName("shortcutName")] ? ((NSString *(*)(id, SEL))objc_msgSend)(sc, sel_registerName("shortcutName")) : phrase;
+                                    NSString *scId = [sc respondsToSelector:sel_registerName("identifier")] ? [((NSUUID *(*)(id, SEL))objc_msgSend)(sc, sel_registerName("identifier")) UUIDString] : @"";
+                                    [shortcutList addObject:@{
+                                        @"name": name ?: @"Unnamed",
+                                        @"id": scId ?: @"",
+                                        @"phrase": phrase ?: @""
+                                    }];
+                                }
+                            }
+                            dispatch_semaphore_signal(sem);
+                        });
+                        dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC));
+                    }
+                }
+            }
+
+            // 3. Query INVoiceShortcutCenter
+            Class centerClass = NSClassFromString(@"INVoiceShortcutCenter");
+            if (centerClass && shortcutList.count == 0) {
+                id center = ((id (*)(id, SEL))objc_msgSend)(centerClass, sel_registerName("sharedCenter"));
+                if (center && [center respondsToSelector:sel_registerName("getAllVoiceShortcutsWithCompletion:")]) {
+                    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+                    ((void (*)(id, SEL, void (^)(NSArray *, NSError *)))objc_msgSend)(center, sel_registerName("getAllVoiceShortcutsWithCompletion:"), ^(NSArray *voiceShortcuts, NSError *error) {
+                        if (voiceShortcuts) {
+                            for (id sc in voiceShortcuts) {
+                                NSString *phrase = [sc respondsToSelector:sel_registerName("invocationPhrase")] ? ((NSString *(*)(id, SEL))objc_msgSend)(sc, sel_registerName("invocationPhrase")) : @"";
+                                NSString *scId = [sc respondsToSelector:sel_registerName("identifier")] ? [((NSUUID *(*)(id, SEL))objc_msgSend)(sc, sel_registerName("identifier")) UUIDString] : @"";
+                                [shortcutList addObject:@{
+                                    @"name": phrase ?: @"Unnamed Shortcut",
+                                    @"id": scId ?: @"",
+                                    @"phrase": phrase ?: @""
+                                }];
+                            }
+                        }
+                        dispatch_semaphore_signal(sem);
+                    });
+                    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC));
+                }
+            }
+
+            response[@"status"] = @"success";
+            response[@"data"] = @{
+                @"count": @(shortcutList.count),
+                @"database_path": dbPath ?: @"",
+                @"shortcuts": shortcutList
+            };
+            [self log:[NSString stringWithFormat:@"Found %lu user shortcuts (DB: %@)", (unsigned long)shortcutList.count, dbPath] isError:NO];
         } else if ([command isEqualToString:@"ACTIVATE"]) {
             // ACTIVATE <class> <is_group> <identifier>
             if (parts.count >= 4) {

@@ -152,14 +152,18 @@ static MCMAPI *MCMGetAPI(void) {
 }
 
 + (NSArray<NSDictionary *> *)listAllApplicationsWithError:(NSString * _Nullable * _Nullable)error {
+    return [self listAllContainersForClass:2 error:error];
+}
+
++ (NSArray<NSDictionary *> *)listAllContainersForClass:(uint64_t)containerClass
+                                                 error:(NSString * _Nullable * _Nullable)error {
     NSMutableArray<NSDictionary *> *results = [NSMutableArray array];
     MCMAPI *api = MCMGetAPI();
 
-    // 1. Primary: Direct MobileContainerManager iteration (Class 2 App Data)
     if (api->queryCreate && api->queryIterate) {
         void *query = api->queryCreate();
         if (query) {
-            api->querySetClass(query, 2);
+            api->querySetClass(query, containerClass);
             if (api->querySetFlags) api->querySetFlags(query, 0x900000000ULL);
 
             api->queryIterate(query, ^bool(void *obj) {
@@ -171,11 +175,11 @@ static MCMAPI *MCMGetAPI(void) {
                     NSString *path = [NSString stringWithUTF8String:rawPath];
                     NSString *name = bundleId.lastPathComponent;
                     
-                    BOOL isSystem = [bundleId hasPrefix:@"com.apple."];
+                    BOOL isSystem = [bundleId hasPrefix:@"com.apple."] || [bundleId hasPrefix:@"group.com.apple."];
                     [results addObject:@{
                         @"name": name ?: bundleId,
-                        @"bundle_id": bundleId,
-                        @"version": @"",
+                        @"identifier": bundleId,
+                        @"class": @(containerClass),
                         @"type": isSystem ? @"System" : @"User",
                         @"container_path": path
                     }];
@@ -186,50 +190,8 @@ static MCMAPI *MCMGetAPI(void) {
         }
     }
 
-    // 2. Fallback / Augment: LaunchServices if MCM returned empty
-    if (results.count == 0) {
-        Class workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
-        if (workspaceClass) {
-            id workspace = ((id (*)(id, SEL))objc_msgSend)(workspaceClass, sel_registerName("defaultWorkspace"));
-            NSArray *apps = nil;
-            if ([workspace respondsToSelector:sel_registerName("allInstalledApplications")]) {
-                apps = ((id (*)(id, SEL))objc_msgSend)(workspace, sel_registerName("allInstalledApplications"));
-            }
-            if (!apps || apps.count == 0) {
-                if ([workspace respondsToSelector:sel_registerName("allApplications")]) {
-                    apps = ((id (*)(id, SEL))objc_msgSend)(workspace, sel_registerName("allApplications"));
-                }
-            }
-
-            if (apps && [apps isKindOfClass:[NSArray class]]) {
-                for (id proxy in apps) {
-                    NSString *bundleId = nil;
-                    if ([proxy respondsToSelector:sel_registerName("applicationIdentifier")]) {
-                        bundleId = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("applicationIdentifier"));
-                    } else if ([proxy respondsToSelector:sel_registerName("bundleIdentifier")]) {
-                        bundleId = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("bundleIdentifier"));
-                    }
-                    if (!bundleId || bundleId.length == 0) continue;
-
-                    NSString *name = nil;
-                    if ([proxy respondsToSelector:sel_registerName("localizedName")]) {
-                        name = ((id (*)(id, SEL))objc_msgSend)(proxy, sel_registerName("localizedName"));
-                    }
-
-                    [results addObject:@{
-                        @"name": name ?: bundleId,
-                        @"bundle_id": bundleId,
-                        @"version": @"",
-                        @"type": [bundleId hasPrefix:@"com.apple."] ? @"System" : @"User",
-                        @"container_path": @""
-                    }];
-                }
-            }
-        }
-    }
-
     [results sortUsingComparator:^NSComparisonResult(NSDictionary *obj1, NSDictionary *obj2) {
-        return [obj1[@"name"] localizedCaseInsensitiveCompare:obj2[@"name"]];
+        return [obj1[@"identifier"] localizedCaseInsensitiveCompare:obj2[@"identifier"]];
     }];
 
     return results;
