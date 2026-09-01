@@ -5,6 +5,8 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 
+extern int64_t sandbox_extension_consume(const char *token);
+
 typedef void *(*MCMQueryCreate)(void);
 typedef void (*MCMQuerySetU64)(void *, uint64_t);
 typedef void (*MCMQuerySetXPC)(void *, xpc_object_t);

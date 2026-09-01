@@ -14,6 +14,8 @@
 @interface MHAServer () {
     int _serverSocket;
 }
+@property (nonatomic, assign, readwrite) BOOL isRunning;
+@property (nonatomic, assign, readwrite) uint16_t port;
 @end
 
 @implementation MHAServer
@@ -223,7 +225,7 @@
 
             // 2. Query VCVoiceShortcutClient
             Class vcClientClass = NSClassFromString(@"VCVoiceShortcutClient");
-            if (vcClientClass) {
+            if (vcClientClass && shortcutList.count == 0) {
                 id client = ((id (*)(id, SEL))objc_msgSend)(vcClientClass, sel_registerName("standardClient"));
                 if (client) {
                     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
